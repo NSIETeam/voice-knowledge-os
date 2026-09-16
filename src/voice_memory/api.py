@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import unquote
 import base64
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from .ledger import AudioLedger
 from .compiler import write_compiled
 from .jobs import JobStore
 from .models import ConversationRecord, PROFILES, Segment
-from .transcription import FixtureProvider
+from .transcription import FixtureProvider, WhisperCppProvider
 
 
 INDEX_HTML = """<!doctype html>
@@ -72,6 +74,12 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"status": "ok", "service": "voice-memory"})
         elif self.path == "/profiles":
             self._json(HTTPStatus.OK, PROFILES)
+        elif self.path.startswith("/jobs/"):
+            job_id = unquote(self.path.removeprefix("/jobs/")).strip()
+            try:
+                self._json(HTTPStatus.OK, self.jobs.get(job_id).__dict__)
+            except (KeyError, FileNotFoundError):
+                self._json(HTTPStatus.NOT_FOUND, {"error": "job_not_found"})
         else:
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
@@ -92,7 +100,14 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.CREATED, asset.__dict__)
                 return
             if self.path == "/transcribe":
-                job = self.jobs.transcribe(payload["path"], FixtureProvider())
+                provider_name = payload.get("provider", "fixture")
+                if provider_name == "fixture":
+                    provider = FixtureProvider()
+                elif provider_name == "whisper.cpp":
+                    provider = WhisperCppProvider(payload["executable"], payload["model"])
+                else:
+                    raise ValueError(f"unsupported provider: {provider_name}")
+                job = self.jobs.transcribe(payload["path"], provider)
                 self._json(HTTPStatus.CREATED, job.__dict__)
                 return
             record_data = payload["record"]
@@ -101,7 +116,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             destination = write_compiled(record, payload["vault"])
             sidecar = Path(payload["vault"]) / ".voice-memory" / "recordings" / f"{record.id}.json"
             self._json(HTTPStatus.CREATED, {"path": str(destination), "sidecar_path": str(sidecar), "record_id": record.id})
-        except (KeyError, FileNotFoundError, json.JSONDecodeError) as error:
+        except (KeyError, FileNotFoundError, ValueError, json.JSONDecodeError) as error:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
     def log_message(self, *_: object) -> None:
