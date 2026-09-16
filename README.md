@@ -29,6 +29,8 @@ pytest
 
 For environments without pytest, run `make smoke`.
 
+Desktop build evidence and remaining release gaps are tracked in [docs/RELEASE_ACCEPTANCE.md](docs/RELEASE_ACCEPTANCE.md).
+
 The demo writes `Recordings/2026-09-16 产品讨论.md`. The file contains YAML metadata, managed sections, transcript segment IDs, confidence, and Obsidian block references back to the source segment.
 
 ## Product contracts

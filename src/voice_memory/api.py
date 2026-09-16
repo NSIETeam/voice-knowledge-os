@@ -26,20 +26,45 @@ INDEX_HTML = """<!doctype html>
 class VoiceMemoryHandler(BaseHTTPRequestHandler):
     ledger: AudioLedger
     jobs: JobStore
+    allowed_origins = {"http://tauri.localhost", "tauri://localhost", "http://127.0.0.1:8765", "http://localhost:8765"}
+
+    def _cors_origin(self) -> str | None:
+        origin = self.headers.get("Origin")
+        return origin if origin in self.allowed_origins else None
 
     def _json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        origin = self._cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        origin = self._cors_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/":
             body = INDEX_HTML.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            origin = self._cors_origin()
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
