@@ -25,5 +25,11 @@ for y in range(size):
 png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b"")
 target = Path(__file__).parent.parent / "src-tauri" / "icons" / "icon.png"
 target.write_bytes(png)
+ico = target.with_suffix(".ico")
+ico.write_bytes(
+    struct.pack("<HHH", 0, 1, 1)
+    + struct.pack("<BBBBHHII", 0, 0, 0, 0, 1, 0, len(png), 6 + 16)
+    + png
+)
 print(target)
-
+print(ico)
