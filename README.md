@@ -33,6 +33,14 @@ Desktop build evidence and remaining release gaps are tracked in [docs/RELEASE_A
 
 The demo writes `Recordings/2026-09-16 产品讨论.md`. The file contains YAML metadata, managed sections, transcript segment IDs, confidence, and Obsidian block references back to the source segment.
 
+Each compiled record also writes a machine-readable sidecar at
+`.voice-memory/recordings/<record-id>.json`. The sidecar is versioned, keeps the
+record and processing contract separate from Markdown, optionally records the
+source audio SHA-256, and preserves a Markdown snapshot under
+`.voice-memory/rollback/<record-id>/` before a recompile. This is the stable
+boundary for a future Obsidian plugin and review UI; raw audio and sensitive
+speaker profiles remain outside ordinary Markdown.
+
 ## Product contracts
 
 - Raw audio and raw transcript are immutable inputs.

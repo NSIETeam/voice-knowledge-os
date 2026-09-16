@@ -1,5 +1,5 @@
 from voice_memory.cli import demo_record
-from voice_memory.compiler import compile_record
+from voice_memory.compiler import compile_record, write_compiled
 
 
 def test_compiler_preserves_evidence_and_managed_boundaries():
@@ -16,3 +16,20 @@ def test_compiler_exposes_uncertainty():
     output = compile_record(record)
     assert "置信度 51%" in output
 
+
+def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):
+    record = demo_record()
+    audio = tmp_path / "source.m4a"
+    audio.write_bytes(b"source-audio")
+    record.audio_path = str(audio)
+    vault = tmp_path / "vault"
+
+    write_compiled(record, vault)
+    first = (vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text()
+    assert '"schema_version": "voice-memory.record.v1"' in first
+    assert '"source_sha256": "' in first
+
+    record.context = "第二次编译"
+    write_compiled(record, vault)
+    backups = list((vault / ".voice-memory" / "rollback" / record.id).glob("*.md"))
+    assert len(backups) == 1

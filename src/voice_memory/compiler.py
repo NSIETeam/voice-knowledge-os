@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import shutil
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,8 +69,42 @@ def compile_record(record: ConversationRecord) -> str:
 
 
 def write_compiled(record: ConversationRecord, vault: str | Path) -> Path:
-    destination = Path(vault) / "Recordings" / f"{record.title}.md"
+    vault_path = Path(vault)
+    destination = vault_path / "Recordings" / f"{record.title}.md"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(compile_record(record), encoding="utf-8")
-    return destination
+    machine_root = vault_path / ".voice-memory"
+    sidecar_dir = machine_root / "recordings"
+    rollback_dir = machine_root / "rollback" / record.id
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        rollback_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        shutil.copyfile(destination, rollback_dir / f"{stamp}.md")
 
+    rendered = compile_record(record)
+    destination.write_text(rendered, encoding="utf-8")
+    audio = Path(record.audio_path).expanduser()
+    source_sha256 = None
+    if audio.is_file():
+        digest = hashlib.sha256()
+        with audio.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        source_sha256 = digest.hexdigest()
+    sidecar = {
+        "schema_version": "voice-memory.record.v1",
+        "record_id": record.id,
+        "source_sha256": source_sha256,
+        "provider": "record-input",
+        "model": None,
+        "processing_profile": record.primary_mode,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "markdown_path": str(destination),
+        "record": record.to_dict(),
+        "correction_history": [],
+    }
+    (sidecar_dir / f"{record.id}.json").write_text(
+        json.dumps(sidecar, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return destination

@@ -99,7 +99,8 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             record = ConversationRecord(**{key: value for key, value in record_data.items() if key != "segments"})
             record.segments = [Segment(**segment) for segment in record_data.get("segments", [])]
             destination = write_compiled(record, payload["vault"])
-            self._json(HTTPStatus.CREATED, {"path": str(destination), "record_id": record.id})
+            sidecar = Path(payload["vault"]) / ".voice-memory" / "recordings" / f"{record.id}.json"
+            self._json(HTTPStatus.CREATED, {"path": str(destination), "sidecar_path": str(sidecar), "record_id": record.id})
         except (KeyError, FileNotFoundError, json.JSONDecodeError) as error:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
