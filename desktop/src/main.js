@@ -115,8 +115,17 @@ function renderReview(record) {
       if (!reviewRecord.audio_asset_id) { reviewStatus.textContent = '此记录未关联本地音频资产'; return; }
       reviewAudio.src = `${apiUrl}/ledger/${encodeURIComponent(reviewRecord.audio_asset_id)}/content`;
       reviewAudio.style.display = 'block';
-      reviewAudio.currentTime = segment.start;
-      try { await reviewAudio.play(); } catch (error) { reviewStatus.textContent = `无法播放：${error.message}`; }
+      try {
+        if (reviewAudio.readyState < HTMLMediaElement.HAVE_METADATA) {
+          await new Promise((resolve, reject) => {
+            reviewAudio.addEventListener('loadedmetadata', resolve, {once:true});
+            reviewAudio.addEventListener('error', () => reject(new Error('音频无法读取')), {once:true});
+            reviewAudio.load();
+          });
+        }
+        reviewAudio.currentTime = segment.start;
+        await reviewAudio.play();
+      } catch (error) { reviewStatus.textContent = `无法播放：${error.message}`; }
     });
     article.append(meta, text, flags, play);
     reviewSegments.append(article);

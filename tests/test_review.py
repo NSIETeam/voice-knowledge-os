@@ -29,3 +29,29 @@ def test_audio_asset_id_is_preserved_in_sidecar(tmp_path):
     write_compiled(record, vault)
     sidecar = json.loads((vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text())
     assert sidecar["record"]["audio_asset_id"] == "asset-123"
+
+
+def test_audio_content_supports_range_requests(tmp_path):
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from voice_memory.api import VoiceMemoryHandler
+    from voice_memory.ledger import AudioLedger
+
+    ledger = AudioLedger(tmp_path / "data")
+    asset = ledger.import_bytes(b"0123456789", "sample.webm")
+    handler = type("TestHandler", (VoiceMemoryHandler,), {"data_root": tmp_path / "data", "ledger": ledger, "jobs": None})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/ledger/{asset.id}/content",
+            headers={"Range": "bytes=3-6"},
+        )
+        with urllib.request.urlopen(request) as response:
+            assert response.status == 206
+            assert response.headers["Content-Range"] == "bytes 3-6/10"
+            assert response.read() == b"3456"
+    finally:
+        server.shutdown()

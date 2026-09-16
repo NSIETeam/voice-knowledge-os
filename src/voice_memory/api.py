@@ -85,13 +85,43 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 if source.parent != objects or not source.is_file():
                     raise FileNotFoundError(asset_id)
                 content_type = mimetypes.guess_type(asset.original_name)[0] or "application/octet-stream"
-                self.send_response(HTTPStatus.OK)
+                size = source.stat().st_size
+                range_header = self.headers.get("Range")
+                start, end = 0, size - 1
+                status = HTTPStatus.OK
+                if range_header:
+                    try:
+                        unit, value = range_header.split("=", 1)
+                        if unit != "bytes" or "," in value:
+                            raise ValueError
+                        first, last = value.split("-", 1)
+                        if first:
+                            start = int(first)
+                            end = min(int(last), size - 1) if last else size - 1
+                        else:
+                            suffix = int(last)
+                            if suffix <= 0:
+                                raise ValueError
+                            start = max(0, size - suffix)
+                        if start < 0 or start >= size or end < start:
+                            raise ValueError
+                        status = HTTPStatus.PARTIAL_CONTENT
+                    except (ValueError, TypeError):
+                        self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                        self.send_header("Content-Range", f"bytes */{size}")
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
+                self.send_response(status)
                 self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(source.stat().st_size))
+                self.send_header("Content-Length", str(end - start + 1))
                 self.send_header("Accept-Ranges", "bytes")
+                if status == HTTPStatus.PARTIAL_CONTENT:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
                 self.end_headers()
                 with source.open("rb") as stream:
-                    self.wfile.write(stream.read())
+                    stream.seek(start)
+                    self.wfile.write(stream.read(end - start + 1))
             except (KeyError, FileNotFoundError):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "audio_asset_not_found"})
         elif self.path.startswith("/jobs/"):
