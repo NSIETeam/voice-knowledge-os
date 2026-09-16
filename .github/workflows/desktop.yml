@@ -51,6 +51,9 @@ jobs:
       - name: Build desktop shell
         working-directory: desktop
         run: npm run build -- --target ${{ matrix.target }}
+      - name: Write bundle SHA-256 manifests
+        working-directory: desktop
+        run: python scripts/write_hashes.py src-tauri/target
       - name: Upload desktop bundles
         if: success()
         uses: actions/upload-artifact@v4
