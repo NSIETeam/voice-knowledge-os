@@ -1,6 +1,6 @@
 # Desktop release acceptance
 
-Evidence for the current desktop milestone is GitHub Actions run [35143729961](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35143729961). macOS Apple Silicon continues to use the previously accepted artifact; the current acceptance focus is Windows x64.
+Evidence for the current desktop milestone is GitHub Actions run [35150265469](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35150265469). Core regression evidence is the full 9-job Python matrix in [run 35152815657](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35152815657). macOS Apple Silicon continues to use the previously accepted local artifact; current packaging focus is Windows x64.
 
 | Target | Result | Artifact |
 |---|---|---|
@@ -20,7 +20,10 @@ The generated artifacts were downloaded and inspected locally:
 - The Windows workflow installed the MSI silently on a Windows runner, located the installed executable, launched it, confirmed that it remained running for the smoke-test window, and then terminated the test process.
 - This build includes the Review Studio desktop UI and its local correction API; the frontend production bundle and both platform desktop builds completed successfully.
 - The Review Studio can seek to a segment offset in a ledger-backed source audio asset; the loopback API was independently tested with an HTTP byte-range request and returned the requested partial content.
+- The original ASR transcript is stored write-once under `.voice-memory/transcripts/` separately from reviewed record sidecars and correction events.
+- The full test suite passed on Windows, macOS, and Ubuntu for Python 3.11, 3.12, and 3.13: 16 tests per matrix job.
 - The desktop shell requests termination of its own sidecar on window teardown; a separate packaged-install exit/relaunch test is still required on each target OS.
+- The independently downloaded Windows MSI SHA-256 is `19ab0bf34b146e8b67b9b435085779b5a1289d0b46d29431a2e896193d425e7e`; the artifact's manifest check passed.
 - Artifact hashes are recorded in the run's downloaded files; a signed release hash manifest is still required before public distribution.
 
 This is a productization milestone, not a formal public release. The artifacts are unsigned/notarization-unverified. macOS Apple Silicon has a local install/runtime smoke test; Windows now has a CI install/launch smoke test, but no physical Windows audio-device acceptance has been performed here. System-audio capture, production transcription/diarization providers, Obsidian integration, update delivery, and signed distribution remain open product work.
