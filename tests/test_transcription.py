@@ -29,3 +29,30 @@ def test_missing_provider_input_is_a_persisted_failure():
         assert job.status == "failed"
         assert "fixture transcript not found" in job.error
 
+
+def test_whisper_outputs_are_kept_out_of_immutable_audio_directory(tmp_path, monkeypatch):
+    from voice_memory.transcription import WhisperCppProvider
+
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    audio = objects / "content-addressed-object"
+    original = b"immutable source bytes"
+    audio.write_bytes(original)
+    output_paths = []
+
+    def fake_run(command, **_kwargs):
+        output_base = Path(command[command.index("-of") + 1])
+        output_paths.append(output_base)
+        output_base.with_suffix(".json").write_text(
+            json.dumps({"transcription": [{"t0": 0, "t1": 123, "text": " local text "}]}),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", fake_run)
+    result = WhisperCppProvider("whisper-cli", "model.bin").transcribe(audio)
+
+    assert result.segments[0].text == "local text"
+    assert output_paths[0].parent != objects
+    assert not output_paths[0].parent.exists()
+    assert audio.read_bytes() == original
+    assert list(objects.iterdir()) == [audio]
