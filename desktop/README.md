@@ -6,7 +6,7 @@ This is the Windows/macOS-first Tauri 2 shell. It is intentionally thin: the Pyt
 
 1. Start the local node from the repository root: `PYTHONPATH=src python -m voice_memory.cli serve .voice-memory`.
 2. Install the desktop dependencies: `npm install`.
-3. Run `npm run dev`.
+3. Generate the local icon: `python scripts/generate_icon.py`.
+4. Run `npm run dev`.
 
 The shell currently proves the cross-platform process boundary and explicit offline state. It is not yet a release artifact: microphone/system-audio capture, packaged Python runtime, code signing, and installer acceptance remain tracked work.
-

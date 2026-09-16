@@ -29,7 +29,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: desktop
         run: npm install
+      - name: Generate deterministic application icon
+        working-directory: desktop
+        run: python scripts/generate_icon.py
       - name: Build desktop shell
         working-directory: desktop
         run: npm run build -- --target ${{ matrix.target }}
-
