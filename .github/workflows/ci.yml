@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    strategy:
+      matrix:
+        os: [macos-14, windows-latest, ubuntu-latest]
+        python: ['3.11', '3.12', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile source
+        shell: bash
+        run: python -m compileall -q src tests
+      - name: Run dependency-free smoke test
+        shell: bash
+        run: PYTHONPATH=src python tests/test_smoke.py
+      - name: Run ledger test
+        shell: bash
+        run: PYTHONPATH=src python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from voice_memory.ledger import AudioLedger
+          with tempfile.TemporaryDirectory() as d:
+              root = Path(d)
+              source = root / 'fixture.m4a'
+              source.write_bytes(b'fixture')
+              ledger = AudioLedger(root / '.voice-memory')
+              assert ledger.import_audio(source).sha256 == ledger.import_audio(source).sha256
+          print('ledger smoke test: PASS')
+          PY

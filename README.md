@@ -12,6 +12,8 @@ The product is intentionally split into replaceable layers:
 
 The first vertical slice in this repository implements the protocol and compiler boundary. It does not claim to ship a production-grade Whisper or speaker-embedding model yet.
 
+The local API and content-addressed audio ledger are now included. Start the API with `PYTHONPATH=src python -m voice_memory.cli serve .voice-memory`; it exposes `GET /health`, `GET /profiles`, and `POST /ledger/import`. The API binds to loopback by default and stores imported bytes under a hash-addressed object path.
+
 The design is informed by open-source projects including [Humla](https://github.com/michaelwilhelmsen/humla) (MIT, local two-stream capture and speaker processing) and [VaultScribe](https://github.com/Junyi-Tang/vaultscribe) (Chinese/English transcription, diarization, and Obsidian export). Their licenses and upstream boundaries must be preserved when adapters are added.
 
 ## Run the first slice
@@ -24,6 +26,8 @@ voice-memory profiles
 voice-memory demo /tmp/voice-memory-vault
 pytest
 ```
+
+For environments without pytest, run `make smoke`.
 
 The demo writes `Recordings/2026-09-16 产品讨论.md`. The file contains YAML metadata, managed sections, transcript segment IDs, confidence, and Obsidian block references back to the source segment.
 
@@ -39,4 +43,3 @@ The demo writes `Recordings/2026-09-16 产品讨论.md`. The file contains YAML 
 ## Roadmap
 
 The detailed implementation backlog is in [docs/ISSUES.md](docs/ISSUES.md). Issues are ordered by acceptance dependency, not by marketing surface area.
-

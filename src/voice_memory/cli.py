@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .compiler import write_compiled
+from .api import serve
 from .models import ConversationRecord, Segment, PROFILES
 
 
@@ -35,12 +36,18 @@ def main() -> None:
     compile_cmd = sub.add_parser("compile", help="compile a JSON conversation record")
     compile_cmd.add_argument("record", type=Path)
     compile_cmd.add_argument("vault", type=Path)
+    server = sub.add_parser("serve", help="start the local API")
+    server.add_argument("root", type=Path)
+    server.add_argument("--host", default="127.0.0.1")
+    server.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     if args.command == "profiles":
         print(json.dumps(PROFILES, ensure_ascii=False, indent=2))
     elif args.command == "demo":
         path = write_compiled(demo_record(), args.vault)
         print(path)
+    elif args.command == "serve":
+        serve(str(args.root), args.host, args.port)
     else:
         record = ConversationRecord(**json.loads(args.record.read_text(encoding="utf-8")))
         record.segments = [Segment(**segment) for segment in record.segments]
@@ -49,4 +56,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
