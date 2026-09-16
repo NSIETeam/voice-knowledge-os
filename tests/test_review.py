@@ -16,12 +16,12 @@ def test_correction_is_replayed_and_preserves_history(tmp_path):
     })
     assert result["record"]["segments"][0]["text"] == "修正后的决定内容"
     assert len(result["correction_history"]) == 1
-    sidecar = json.loads((vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text())
+    sidecar = json.loads((vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text(encoding="utf-8"))
     assert sidecar["correction_history"][0]["before"]["text"] != sidecar["correction_history"][0]["after"]["text"]
-    transcript = json.loads((vault / ".voice-memory" / "transcripts" / f"{record.id}.json").read_text())
+    transcript = json.loads((vault / ".voice-memory" / "transcripts" / f"{record.id}.json").read_text(encoding="utf-8"))
     assert transcript["schema_version"] == "voice-memory.transcript.v1"
     assert transcript["segments"][0]["text"] != "修正后的决定内容"
-    markdown = (vault / "Recordings" / f"{record.title}.md").read_text()
+    markdown = (vault / "Recordings" / f"{record.title}.md").read_text(encoding="utf-8")
     assert "修正后的决定内容" in markdown
 
 
@@ -41,7 +41,7 @@ def test_audio_asset_id_is_preserved_in_sidecar(tmp_path):
     record = demo_record()
     record.audio_asset_id = "asset-123"
     write_compiled(record, vault)
-    sidecar = json.loads((vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text())
+    sidecar = json.loads((vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text(encoding="utf-8"))
     assert sidecar["record"]["audio_asset_id"] == "asset-123"
 
 

@@ -37,7 +37,7 @@ def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):
     vault = tmp_path / "vault"
 
     write_compiled(record, vault)
-    first = (vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text()
+    first = (vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text(encoding="utf-8")
     assert '"schema_version": "voice-memory.record.v1"' in first
     assert '"source_sha256": "' in first
     assert '"provider": "fixture"' in first
