@@ -14,6 +14,10 @@ async function startNode() {
   }
 }
 
+window.addEventListener('beforeunload', () => {
+  void nodeProcess?.kill();
+});
+
 async function check() {
   status.className = '';
   status.textContent = '检查中…';
