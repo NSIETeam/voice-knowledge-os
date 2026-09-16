@@ -17,6 +17,15 @@ def test_compiler_exposes_uncertainty():
     assert "置信度 51%" in output
 
 
+def test_compiler_exposes_review_state():
+    record = demo_record()
+    record.segments[0].speaker_status = "confirmed"
+    record.segments[0].unclear = True
+    output = compile_record(record)
+    assert "（已确认）" in output
+    assert "不清楚" in output
+
+
 def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):
     record = demo_record()
     record.transcript_provider = "fixture"

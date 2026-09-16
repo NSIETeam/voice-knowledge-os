@@ -10,6 +10,13 @@
       .card { border: 1px solid #8885; border-radius: 12px; padding: 20px; margin-top: 18px; }
       .ok { color: #16833b; } .warn { color: #b15b00; }
       button { padding: 8px 14px; border-radius: 8px; border: 1px solid #8888; }
+      input, textarea, select { font: inherit; padding: 7px; border-radius: 6px; border: 1px solid #8888; box-sizing: border-box; }
+      input, textarea { width: 100%; } textarea { min-height: 64px; resize: vertical; }
+      .review-segment { border-top: 1px solid #8884; padding: 14px 0; }
+      .review-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+      .review-meta input { width: 180px; } .review-meta select { width: 120px; }
+      .badge { border-radius: 999px; padding: 3px 8px; font-size: .85em; background: #8883; }
+      .badge.confirmed { color: #16833b; } .badge.suggestion { color: #9a6500; } .badge.unknown { color: #666; }
     </style>
   </head>
   <body>
@@ -17,6 +24,11 @@
     <p>Local-first voice knowledge compiler</p>
     <div class="card"><strong>本地处理节点</strong><p id="status">检查中…</p><button id="retry">重新检查</button></div>
     <div class="card"><strong>麦克风录音</strong><p id="recordStatus">未开始</p><button id="record">开始录音</button></div>
+    <div class="card"><strong>Review Studio（证据复核）</strong>
+      <p>输入记录 ID，修正转写或说话人标签。每次修改都会保留前后值并重新生成证据 Markdown。</p>
+      <div class="review-meta"><input id="reviewRecordId" placeholder="记录 ID" /><button id="loadReview">加载记录</button><button id="saveReview" disabled>保存修改</button></div>
+      <p id="reviewStatus">未加载记录</p><div id="reviewSegments"></div>
+    </div>
     <div class="card"><strong>隐私边界</strong><p>桌面壳只访问本机 loopback API。录音、转写和声纹数据不会因为打开界面而上传。</p></div>
     <script type="module" src="/main.js"></script>
   </body>

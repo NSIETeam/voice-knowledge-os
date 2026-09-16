@@ -13,6 +13,8 @@ class Segment:
     text: str
     confidence: float | None = None
     overlap: bool = False
+    unclear: bool = False
+    speaker_status: str = "unknown"
     source: str = "transcript"
 
     def evidence(self, recording_title: str) -> str:

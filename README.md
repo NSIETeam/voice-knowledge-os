@@ -14,6 +14,8 @@ The first vertical slice in this repository implements the protocol and compiler
 
 The local API and content-addressed audio ledger are now included. Start the API with `PYTHONPATH=src python -m voice_memory.cli serve .voice-memory`; it exposes a local status page, `GET /health`, `GET /profiles`, `GET /jobs/<id>`, `POST /ledger/import`, `POST /ledger/upload`, `POST /transcribe` (offline fixture or local `whisper.cpp`), and `POST /records/compile`. The desktop shell can capture microphone audio through the OS permission prompt and upload it only to the loopback ledger. System-audio capture remains a separate native adapter task. The API binds to loopback by default and stores imported bytes under a hash-addressed object path. Production ASR providers implement the same interface; the local `whisper.cpp` subprocess adapter never receives or logs API keys.
 
+The desktop shell now includes a local Review Studio. Load a compiled record by ID with `GET /records/<id>`, then submit `POST /records/<id>/corrections` for text edits, speaker relabeling, overlap flags, or unclear markers. Every correction stores an event with before/after values in the sidecar and recompiles the Markdown record with the review state visible. The original audio and prior Markdown snapshots remain separate from the correction history.
+
 The design is informed by open-source projects including [Humla](https://github.com/michaelwilhelmsen/humla) (MIT, local two-stream capture and speaker processing) and [VaultScribe](https://github.com/Junyi-Tang/vaultscribe) (Chinese/English transcription, diarization, and Obsidian export). Their licenses and upstream boundaries must be preserved when adapters are added.
 
 ## Run the first slice

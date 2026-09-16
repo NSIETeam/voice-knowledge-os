@@ -13,6 +13,7 @@ from .compiler import write_compiled
 from .jobs import JobStore
 from .models import ConversationRecord, PROFILES, Segment
 from .transcription import FixtureProvider, WhisperCppProvider
+from .review import apply_correction, load_sidecar
 
 
 INDEX_HTML = """<!doctype html>
@@ -80,10 +81,27 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.jobs.get(job_id).__dict__)
             except (KeyError, FileNotFoundError):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "job_not_found"})
+        elif self.path.startswith("/records/"):
+            record_id = unquote(self.path.removeprefix("/records/")).strip()
+            try:
+                _, sidecar = load_sidecar(self.data_root, record_id)
+                self._json(HTTPStatus.OK, sidecar)
+            except FileNotFoundError:
+                self._json(HTTPStatus.NOT_FOUND, {"error": "record_not_found"})
         else:
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path.startswith("/records/") and self.path.endswith("/corrections"):
+            record_id = unquote(self.path.removeprefix("/records/").removesuffix("/corrections")).strip()
+            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                payload = json.loads(self.rfile.read(length))
+                result = apply_correction(self.data_root, record_id, payload)
+                self._json(HTTPStatus.OK, result)
+            except (FileNotFoundError, KeyError, ValueError, json.JSONDecodeError) as error:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if self.path not in ("/ledger/import", "/ledger/upload", "/records/compile", "/transcribe"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
@@ -124,7 +142,11 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
 
 
 def serve(root: str, host: str = "127.0.0.1", port: int = 8765) -> None:
-    handler = type("ConfiguredVoiceMemoryHandler", (VoiceMemoryHandler,), {"ledger": AudioLedger(root), "jobs": JobStore(root)})
+    handler = type(
+        "ConfiguredVoiceMemoryHandler",
+        (VoiceMemoryHandler,),
+        {"ledger": AudioLedger(root), "jobs": JobStore(root), "data_root": Path(root)},
+    )
     server = ThreadingHTTPServer((host, port), handler)
     print(f"Voice Memory listening on http://{host}:{port}")
     server.serve_forever()

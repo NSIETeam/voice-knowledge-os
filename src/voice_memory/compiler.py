@@ -24,10 +24,12 @@ def compile_record(record: ConversationRecord) -> str:
     segment_lines = []
     for segment in record.segments:
         identity = segment.speaker
+        speaker_state = {"confirmed": "已确认", "suggestion": "建议", "unknown": "未知"}.get(segment.speaker_status, "未知")
         certainty = f" · 置信度 {segment.confidence:.0%}" if segment.confidence is not None else ""
         flags = " · 重叠发言" if segment.overlap else ""
+        flags += " · 不清楚" if segment.unclear else ""
         segment_lines.append(
-            f"**{identity}** ({segment.start:.1f}s–{segment.end:.1f}s{certainty}{flags})\n\n"
+            f"**{identity}**（{speaker_state}） ({segment.start:.1f}s–{segment.end:.1f}s{certainty}{flags})\n\n"
             f"{segment.text} ^{segment.id}"
         )
     transcript = "\n\n---\n\n".join(segment_lines) or "_尚未导入转写。_"
@@ -68,7 +70,11 @@ def compile_record(record: ConversationRecord) -> str:
     ])
 
 
-def write_compiled(record: ConversationRecord, vault: str | Path) -> Path:
+def write_compiled(
+    record: ConversationRecord,
+    vault: str | Path,
+    correction_history: list[dict] | None = None,
+) -> Path:
     vault_path = Path(vault)
     destination = vault_path / "Recordings" / f"{record.title}.md"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +97,15 @@ def write_compiled(record: ConversationRecord, vault: str | Path) -> Path:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
         source_sha256 = digest.hexdigest()
+    if correction_history is None:
+        previous = sidecar_dir / f"{record.id}.json"
+        if previous.is_file():
+            try:
+                correction_history = json.loads(previous.read_text(encoding="utf-8")).get("correction_history", [])
+            except (OSError, json.JSONDecodeError):
+                correction_history = []
+        else:
+            correction_history = []
     sidecar = {
         "schema_version": "voice-memory.record.v1",
         "record_id": record.id,
@@ -102,7 +117,7 @@ def write_compiled(record: ConversationRecord, vault: str | Path) -> Path:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "markdown_path": str(destination),
         "record": record.to_dict(),
-        "correction_history": [],
+        "correction_history": correction_history,
     }
     (sidecar_dir / f"{record.id}.json").write_text(
         json.dumps(sidecar, ensure_ascii=False, indent=2) + "\n",
