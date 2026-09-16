@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: desktop/package.json
+          cache-dependency-path: desktop/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -32,7 +32,7 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Install frontend dependencies
         working-directory: desktop
-        run: npm install
+        run: npm ci
       - name: Build bundled local processing node
         working-directory: desktop
         shell: bash
@@ -41,6 +41,10 @@ jobs:
           pyinstaller --onefile --name voice-memory-node --paths ../src sidecar_entry.py
           mkdir -p src-tauri/binaries
           cp dist/voice-memory-node src-tauri/binaries/voice-memory-node-${{ matrix.target }}
+      - name: Smoke test bundled local processing node
+        working-directory: desktop
+        shell: bash
+        run: ./src-tauri/binaries/voice-memory-node-${{ matrix.target }} --help
       - name: Generate deterministic application icon
         working-directory: desktop
         run: python scripts/generate_icon.py
