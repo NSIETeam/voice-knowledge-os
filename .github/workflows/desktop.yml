@@ -54,6 +54,21 @@ jobs:
       - name: Write bundle SHA-256 manifests
         working-directory: desktop
         run: python scripts/write_hashes.py src-tauri/target
+      - name: Install and launch Windows MSI smoke test
+        if: matrix.os == 'windows-latest'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem -Path src-tauri/target -Filter *.msi -Recurse | Select-Object -First 1
+          if (-not $msi) { throw "Windows MSI not found" }
+          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi.FullName, '/qn', '/norestart') -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "msiexec failed with exit code $($install.ExitCode)" }
+          $exe = Get-ChildItem -Path "$env:ProgramFiles\Voice Memory" -Filter *.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "Installed Voice Memory executable not found" }
+          $app = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 5
+          if ($app.HasExited) { throw "Installed Voice Memory process exited during launch smoke test" }
+          Stop-Process -Id $app.Id -Force
       - name: Upload desktop bundles
         if: success()
         uses: actions/upload-artifact@v4
