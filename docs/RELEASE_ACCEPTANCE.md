@@ -1,6 +1,6 @@
 # Desktop release acceptance
 
-Evidence for the current desktop milestone is GitHub Actions run [35094192697](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35094192697).
+Evidence for the current desktop milestone is GitHub Actions run [35097341487](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35097341487). macOS Apple Silicon continues to use the previously accepted artifact; the current acceptance focus is Windows x64.
 
 | Target | Result | Artifact |
 |---|---|---|
@@ -16,6 +16,7 @@ The generated artifacts were downloaded and inspected locally:
 - The packaged macOS app was launched locally; its bundled sidecar process appeared automatically and the UI reported `本地处理节点正常` after re-checking.
 - Both platform jobs run the packaged sidecar with `--help` before building the installer; this verifies that the PyInstaller executable is runnable on the target runner.
 - The desktop workflow uses the committed npm lockfile with `npm ci` for reproducible frontend dependencies.
+- The Windows MSI artifact was downloaded independently and its bundled `SHA256SUMS.txt` verified successfully with `sha256sum -c`.
 - The desktop shell requests termination of its own sidecar on window teardown; a separate packaged-install exit/relaunch test is still required on each target OS.
 - Artifact hashes are recorded in the run's downloaded files; a signed release hash manifest is still required before public distribution.
 
