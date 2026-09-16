@@ -6,4 +6,5 @@ __pycache__/
 dist/
 desktop/dist/
 desktop/build/
+desktop/node_modules/
 desktop/src-tauri/binaries/

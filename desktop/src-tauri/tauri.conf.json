@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.voicememory.desktop",
   "build": {
-    "frontendDist": "../src"
+    "beforeBuildCommand": "npm run frontend:build",
+    "frontendDist": "../dist"
   },
   "plugins": {
     "shell": {
