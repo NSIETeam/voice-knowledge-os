@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - "desktop/**"
+      - "src/**"
+      - "pyproject.toml"
 
 jobs:
   build-shell:
