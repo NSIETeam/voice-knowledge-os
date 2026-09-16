@@ -6,7 +6,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .ledger import AudioLedger
-from .models import PROFILES
+from .compiler import write_compiled
+from .models import ConversationRecord, PROFILES, Segment
+
+
+INDEX_HTML = """<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>Voice Memory</title>
+<style>body{font:16px system-ui;max-width:760px;margin:48px auto;padding:0 20px;color:#202124}button{padding:8px 14px}code{background:#f1f3f4;padding:2px 5px}section{border:1px solid #ddd;border-radius:10px;padding:18px;margin:16px 0}</style>
+<h1>Voice Memory</h1><p>Local-first voice knowledge compiler</p>
+<section><h2>本地状态</h2><p id="health">读取中…</p><p id="profiles">处理模式读取中…</p></section>
+<section><h2>下一步</h2><p>使用 CLI 导入并编译：<code>voice-memory demo /path/to/vault</code></p><p>API 默认只监听 <code>127.0.0.1</code>，不会向局域网暴露录音。</p></section>
+<script>Promise.all([fetch('/health').then(r=>r.json()),fetch('/profiles').then(r=>r.json())]).then(([h,p])=>{health.textContent=h.status==='ok'?'服务正常':'服务异常';profiles.textContent=`已加载 ${Object.keys(p).length} 个处理模式`})</script>
+</html>"""
 
 
 class VoiceMemoryHandler(BaseHTTPRequestHandler):
@@ -21,7 +32,14 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/health":
+        if self.path == "/":
+            body = INDEX_HTML.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/health":
             self._json(HTTPStatus.OK, {"status": "ok", "service": "voice-memory"})
         elif self.path == "/profiles":
             self._json(HTTPStatus.OK, PROFILES)
@@ -29,14 +47,21 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/ledger/import":
+        if self.path not in ("/ledger/import", "/records/compile"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         length = int(self.headers.get("Content-Length", "0"))
         try:
             payload = json.loads(self.rfile.read(length))
-            asset = self.ledger.import_audio(payload["path"], payload.get("sensitivity", "private"))
-            self._json(HTTPStatus.CREATED, asset.__dict__)
+            if self.path == "/ledger/import":
+                asset = self.ledger.import_audio(payload["path"], payload.get("sensitivity", "private"))
+                self._json(HTTPStatus.CREATED, asset.__dict__)
+                return
+            record_data = payload["record"]
+            record = ConversationRecord(**{key: value for key, value in record_data.items() if key != "segments"})
+            record.segments = [Segment(**segment) for segment in record_data.get("segments", [])]
+            destination = write_compiled(record, payload["vault"])
+            self._json(HTTPStatus.CREATED, {"path": str(destination), "record_id": record.id})
         except (KeyError, FileNotFoundError, json.JSONDecodeError) as error:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
@@ -49,4 +74,3 @@ def serve(root: str, host: str = "127.0.0.1", port: int = 8765) -> None:
     server = ThreadingHTTPServer((host, port), handler)
     print(f"Voice Memory listening on http://{host}:{port}")
     server.serve_forever()
-
