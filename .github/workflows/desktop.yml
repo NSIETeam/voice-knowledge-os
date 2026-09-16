@@ -1,0 +1,35 @@
+name: Desktop shell
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "desktop/**"
+
+jobs:
+  build-shell:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm install
+      - name: Build desktop shell
+        working-directory: desktop
+        run: npm run build -- --target ${{ matrix.target }}
+

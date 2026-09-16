@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voice Memory</title>
+    <style>
+      :root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
+      body { max-width: 760px; margin: 0 auto; padding: 48px 24px; }
+      .card { border: 1px solid #8885; border-radius: 12px; padding: 20px; margin-top: 18px; }
+      .ok { color: #16833b; } .warn { color: #b15b00; }
+      button { padding: 8px 14px; border-radius: 8px; border: 1px solid #8888; }
+    </style>
+  </head>
+  <body>
+    <h1>Voice Memory</h1>
+    <p>Local-first voice knowledge compiler</p>
+    <div class="card"><strong>本地处理节点</strong><p id="status">检查中…</p><button id="retry">重新检查</button></div>
+    <div class="card"><strong>隐私边界</strong><p>桌面壳只访问本机 loopback API。录音、转写和声纹数据不会因为打开界面而上传。</p></div>
+    <script type="module">
+      const status = document.querySelector('#status');
+      async function check() {
+        status.className = '';
+        status.textContent = '检查中…';
+        try {
+          const response = await fetch('http://127.0.0.1:8765/health');
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          status.className = 'ok';
+          status.textContent = '本地处理节点正常';
+        } catch (error) {
+          status.className = 'warn';
+          status.textContent = '本地处理节点未启动，请先运行 voice-memory serve';
+        }
+      }
+      document.querySelector('#retry').addEventListener('click', check);
+      check();
+    </script>
+  </body>
+</html>
+

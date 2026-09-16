@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Voice Memory",
+  "version": "0.1.0",
+  "identifier": "com.voicememory.desktop",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "windows": [{
+      "title": "Voice Memory",
+      "width": 900,
+      "height": 680,
+      "minWidth": 640,
+      "minHeight": 480,
+      "resizable": true
+    }],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8765; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "msi", "dmg"],
+    "createUpdaterArtifacts": false
+  }
+}
+
