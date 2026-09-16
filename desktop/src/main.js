@@ -71,6 +71,7 @@ let reviewRecord;
 const reviewStatus = document.querySelector('#reviewStatus');
 const reviewSegments = document.querySelector('#reviewSegments');
 const saveReview = document.querySelector('#saveReview');
+const reviewAudio = document.querySelector('#reviewAudio');
 
 function reviewBadge(status) {
   const badge = document.createElement('span');
@@ -108,7 +109,16 @@ function renderReview(record) {
     const overlapText = document.createTextNode(' 重叠发言 ');
     const unclear = document.createElement('input'); unclear.type = 'checkbox'; unclear.checked = Boolean(segment.unclear); unclear.style.width = 'auto';
     flags.append(overlap, overlapText, unclear, document.createTextNode(' 不清楚'));
-    article.append(meta, text, flags);
+    const play = document.createElement('button');
+    play.type = 'button'; play.textContent = '播放此段';
+    play.addEventListener('click', async () => {
+      if (!reviewRecord.audio_asset_id) { reviewStatus.textContent = '此记录未关联本地音频资产'; return; }
+      reviewAudio.src = `${apiUrl}/ledger/${encodeURIComponent(reviewRecord.audio_asset_id)}/content`;
+      reviewAudio.style.display = 'block';
+      reviewAudio.currentTime = segment.start;
+      try { await reviewAudio.play(); } catch (error) { reviewStatus.textContent = `无法播放：${error.message}`; }
+    });
+    article.append(meta, text, flags, play);
     reviewSegments.append(article);
   }
   saveReview.disabled = false;

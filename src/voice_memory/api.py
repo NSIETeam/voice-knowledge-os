@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from urllib.parse import unquote
 import base64
+import mimetypes
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -75,6 +76,24 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"status": "ok", "service": "voice-memory"})
         elif self.path == "/profiles":
             self._json(HTTPStatus.OK, PROFILES)
+        elif self.path.startswith("/ledger/") and self.path.endswith("/content"):
+            asset_id = unquote(self.path.removeprefix("/ledger/").removesuffix("/content")).strip()
+            try:
+                asset = self.ledger.get(asset_id)
+                source = Path(asset.stored_path).resolve()
+                objects = self.ledger.objects.resolve()
+                if source.parent != objects or not source.is_file():
+                    raise FileNotFoundError(asset_id)
+                content_type = mimetypes.guess_type(asset.original_name)[0] or "application/octet-stream"
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(source.stat().st_size))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+                with source.open("rb") as stream:
+                    self.wfile.write(stream.read())
+            except (KeyError, FileNotFoundError):
+                self._json(HTTPStatus.NOT_FOUND, {"error": "audio_asset_not_found"})
         elif self.path.startswith("/jobs/"):
             job_id = unquote(self.path.removeprefix("/jobs/")).strip()
             try:

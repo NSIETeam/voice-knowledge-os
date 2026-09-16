@@ -48,6 +48,7 @@ def compile_record(record: ConversationRecord) -> str:
         "context": record.context,
         "sensitivity": record.sensitivity,
         "audio": record.audio_path,
+        "audio_asset_id": record.audio_asset_id,
     }
     yaml = "\n".join(
         ["---"] + [f"{key}: {value}" for key, value in metadata.items()] + ["people:", people, "---"]

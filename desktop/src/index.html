@@ -27,7 +27,7 @@
     <div class="card"><strong>Review Studio（证据复核）</strong>
       <p>输入记录 ID，修正转写或说话人标签。每次修改都会保留前后值并重新生成证据 Markdown。</p>
       <div class="review-meta"><input id="reviewRecordId" placeholder="记录 ID" /><button id="loadReview">加载记录</button><button id="saveReview" disabled>保存修改</button></div>
-      <p id="reviewStatus">未加载记录</p><div id="reviewSegments"></div>
+      <p id="reviewStatus">未加载记录</p><audio id="reviewAudio" controls preload="metadata" style="width:100%;display:none"></audio><div id="reviewSegments"></div>
     </div>
     <div class="card"><strong>隐私边界</strong><p>桌面壳只访问本机 loopback API。录音、转写和声纹数据不会因为打开界面而上传。</p></div>
     <script type="module" src="/main.js"></script>

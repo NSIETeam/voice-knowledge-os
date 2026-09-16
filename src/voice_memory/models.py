@@ -29,6 +29,7 @@ class ConversationRecord:
     created_at: str
     audio_path: str
     primary_mode: str
+    audio_asset_id: str | None = None
     context: str = "未指定"
     people: list[str] = field(default_factory=list)
     company: str | None = None
