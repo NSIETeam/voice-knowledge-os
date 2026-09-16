@@ -61,7 +61,14 @@ jobs:
         run: |
           $msi = Get-ChildItem -Path src-tauri/target -Filter *.msi -Recurse | Select-Object -First 1
           if (-not $msi) { throw "Windows MSI not found" }
-          $install = Start-Process msiexec.exe -ArgumentList @('/i', $msi.FullName, '/qn', '/norestart') -Wait -PassThru
+          $log = Join-Path $env:TEMP 'voice-memory-msi.log'
+          $arguments = "/i `"$($msi.FullName)`" /qn /norestart /L*v `"$log`""
+          $install = Start-Process msiexec.exe -ArgumentList $arguments -PassThru
+          if (-not $install.WaitForExit(120000)) {
+            Stop-Process -Id $install.Id -Force
+            if (Test-Path $log) { Get-Content $log -Tail 80 }
+            throw "msiexec did not finish within 120 seconds"
+          }
           if ($install.ExitCode -ne 0) { throw "msiexec failed with exit code $($install.ExitCode)" }
           $exe = Get-ChildItem -Path "$env:ProgramFiles\Voice Memory" -Filter *.exe -Recurse | Select-Object -First 1
           if (-not $exe) { throw "Installed Voice Memory executable not found" }
