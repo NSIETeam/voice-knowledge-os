@@ -72,9 +72,35 @@ class AudioLedger:
         record_path.write_text(json.dumps(asdict(asset), ensure_ascii=False, indent=2), encoding="utf-8")
         return asset
 
+    def import_bytes(self, content: bytes, original_name: str, sensitivity: str = "private") -> AudioAsset:
+        """Import bytes received from a loopback capture client without a temp path."""
+        digest = hashlib.sha256(content).hexdigest()
+        object_path = self.objects / digest
+        if not object_path.exists():
+            temporary = self.objects / f".{digest}.part"
+            try:
+                temporary.write_bytes(content)
+                temporary.replace(object_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        asset = AudioAsset(
+            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"voice-memory:{digest}")),
+            sha256=digest,
+            original_name=original_name,
+            source_path="loopback-upload",
+            stored_path=str(object_path),
+            size_bytes=len(content),
+            imported_at=datetime.now(timezone.utc).isoformat(),
+            sensitivity=sensitivity,
+        )
+        record_path = self.records / f"{asset.id}.json"
+        if record_path.exists():
+            return AudioAsset(**json.loads(record_path.read_text(encoding="utf-8")))
+        record_path.write_text(json.dumps(asdict(asset), ensure_ascii=False, indent=2), encoding="utf-8")
+        return asset
+
     def get(self, asset_id: str) -> AudioAsset:
         path = self.records / f"{asset_id}.json"
         if not path.is_file():
             raise KeyError(asset_id)
         return AudioAsset(**json.loads(path.read_text(encoding="utf-8")))
-

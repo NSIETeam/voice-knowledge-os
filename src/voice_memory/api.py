@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import base64
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -50,7 +51,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path not in ("/ledger/import", "/records/compile", "/transcribe"):
+        if self.path not in ("/ledger/import", "/ledger/upload", "/records/compile", "/transcribe"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -58,6 +59,11 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             if self.path == "/ledger/import":
                 asset = self.ledger.import_audio(payload["path"], payload.get("sensitivity", "private"))
+                self._json(HTTPStatus.CREATED, asset.__dict__)
+                return
+            if self.path == "/ledger/upload":
+                content = base64.b64decode(payload["data_base64"], validate=True)
+                asset = self.ledger.import_bytes(content, payload.get("name", "recording.webm"), payload.get("sensitivity", "private"))
                 self._json(HTTPStatus.CREATED, asset.__dict__)
                 return
             if self.path == "/transcribe":
