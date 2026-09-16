@@ -24,7 +24,8 @@ jobs:
         run: PYTHONPATH=src python tests/test_smoke.py
       - name: Run ledger test
         shell: bash
-        run: PYTHONPATH=src python - <<'PY'
+        run: |
+          PYTHONPATH=src python - <<'PY'
           import tempfile
           from pathlib import Path
           from voice_memory.ledger import AudioLedger
