@@ -18,6 +18,53 @@ def _managed(section_id: str, body: str, version: int = 1) -> str:
     )
 
 
+def write_source_transcript_snapshot(record: ConversationRecord, vault: str | Path) -> Path:
+    transcript_dir = Path(vault) / ".voice-memory" / "transcripts"
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = transcript_dir / f"{record.id}.json"
+    if transcript_path.exists():
+        return transcript_path
+    audio = Path(record.audio_path).expanduser()
+    source_sha256 = None
+    if audio.is_file():
+        digest = hashlib.sha256()
+        with audio.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        source_sha256 = digest.hexdigest()
+    snapshot = {
+        "schema_version": "voice-memory.transcript.v1",
+        "record_id": record.id,
+        "source_sha256": source_sha256,
+        "provider": record.transcript_provider,
+        "model": record.transcript_model,
+        "language": record.transcript_language,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "segments": [
+            {
+                "id": segment.id,
+                "start": segment.start,
+                "end": segment.end,
+                "speaker": segment.speaker,
+                "text": segment.text,
+                "confidence": segment.confidence,
+                "overlap": segment.overlap,
+                "unclear": segment.unclear,
+                "speaker_status": segment.speaker_status,
+                "source": segment.source,
+            }
+            for segment in record.segments
+        ],
+    }
+    try:
+        with transcript_path.open("x", encoding="utf-8") as stream:
+            json.dump(snapshot, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+    except FileExistsError:
+        pass
+    return transcript_path
+
+
 def compile_record(record: ConversationRecord) -> str:
     profile = PROFILES.get(record.primary_mode, {"name": record.primary_mode, "extract": []})
     people = "\n".join(f"  - {person}" for person in record.people) or "  - 未确认"
@@ -98,6 +145,7 @@ def write_compiled(
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
         source_sha256 = digest.hexdigest()
+    write_source_transcript_snapshot(record, vault_path)
     if correction_history is None:
         previous = sidecar_dir / f"{record.id}.json"
         if previous.is_file():

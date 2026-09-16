@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .compiler import write_compiled
+from .compiler import write_compiled, write_source_transcript_snapshot
 from .models import ConversationRecord, Segment
 
 
@@ -37,6 +37,8 @@ def apply_correction(data_root: str | Path, record_id: str, operation: dict[str,
     record = _record_from_sidecar(sidecar)
     if record.id != record_id:
         raise ValueError("record id does not match sidecar")
+    vault = path.parent.parent.parent
+    write_source_transcript_snapshot(record, vault)
     segment_id = operation.get("segment_id")
     segment = next((item for item in record.segments if item.id == segment_id), None)
     if segment is None:
@@ -72,7 +74,6 @@ def apply_correction(data_root: str | Path, record_id: str, operation: dict[str,
     }
     history = list(sidecar.get("correction_history", []))
     history.append(event)
-    vault = path.parent.parent.parent
     write_compiled(record, vault, correction_history=history)
     _, updated = load_sidecar(data_root, record_id)
     return {"record": updated["record"], "correction": event, "correction_history": updated["correction_history"]}

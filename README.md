@@ -16,6 +16,8 @@ The local API and content-addressed audio ledger are now included. Start the API
 
 The desktop shell now includes a local Review Studio. Load a compiled record by ID with `GET /records/<id>`, seek and play its immutable ledger audio through the byte-range-enabled `GET /ledger/<asset-id>/content`, then submit `POST /records/<id>/corrections` for text edits, speaker relabeling, overlap flags, or unclear markers. Every correction stores an event with before/after values in the sidecar and recompiles the Markdown record with the review state visible. The original audio and prior Markdown snapshots remain separate from the correction history; records should set `audio_asset_id` when they are compiled from a ledger asset.
 
+The first compile also creates `.voice-memory/transcripts/<record-id>.json` with schema `voice-memory.transcript.v1`. It is write-once source ASR output, separate from corrected record sidecars and correction events; review corrections never replace this baseline transcript.
+
 The design is informed by open-source projects including [Humla](https://github.com/michaelwilhelmsen/humla) (MIT, local two-stream capture and speaker processing) and [VaultScribe](https://github.com/Junyi-Tang/vaultscribe) (Chinese/English transcription, diarization, and Obsidian export). Their licenses and upstream boundaries must be preserved when adapters are added.
 
 ## Run the first slice

@@ -18,8 +18,22 @@ def test_correction_is_replayed_and_preserves_history(tmp_path):
     assert len(result["correction_history"]) == 1
     sidecar = json.loads((vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text())
     assert sidecar["correction_history"][0]["before"]["text"] != sidecar["correction_history"][0]["after"]["text"]
+    transcript = json.loads((vault / ".voice-memory" / "transcripts" / f"{record.id}.json").read_text())
+    assert transcript["schema_version"] == "voice-memory.transcript.v1"
+    assert transcript["segments"][0]["text"] != "修正后的决定内容"
     markdown = (vault / "Recordings" / f"{record.title}.md").read_text()
     assert "修正后的决定内容" in markdown
+
+
+def test_source_transcript_snapshot_is_immutable_across_recompile(tmp_path):
+    vault = tmp_path / "vault"
+    record = demo_record()
+    write_compiled(record, vault)
+    path = vault / ".voice-memory" / "transcripts" / f"{record.id}.json"
+    original = path.read_bytes()
+    record.segments[0].text = "later corrected value"
+    write_compiled(record, vault)
+    assert path.read_bytes() == original
 
 
 def test_audio_asset_id_is_preserved_in_sidecar(tmp_path):
