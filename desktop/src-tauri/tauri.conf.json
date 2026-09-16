@@ -6,6 +6,11 @@
   "build": {
     "frontendDist": "../src"
   },
+  "plugins": {
+    "shell": {
+      "open": false
+    }
+  },
   "app": {
     "windows": [{
       "title": "Voice Memory",
@@ -22,6 +27,7 @@
   "bundle": {
     "active": true,
     "icon": ["icons/icon.png", "icons/icon.ico"],
+    "externalBin": ["binaries/voice-memory-node"],
     "targets": ["app", "msi", "dmg"],
     "createUpdaterArtifacts": false
   }

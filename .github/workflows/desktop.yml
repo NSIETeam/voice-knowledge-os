@@ -24,12 +24,23 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: desktop/package.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - name: Install frontend dependencies
         working-directory: desktop
         run: npm install
+      - name: Build bundled local processing node
+        working-directory: desktop
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check pyinstaller
+          pyinstaller --onefile --name voice-memory-node --paths ../src sidecar_entry.py
+          mkdir -p src-tauri/binaries
+          cp dist/voice-memory-node src-tauri/binaries/voice-memory-node-${{ matrix.target }}
       - name: Generate deterministic application icon
         working-directory: desktop
         run: python scripts/generate_icon.py

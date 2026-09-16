@@ -37,7 +37,7 @@ def main() -> None:
     compile_cmd.add_argument("record", type=Path)
     compile_cmd.add_argument("vault", type=Path)
     server = sub.add_parser("serve", help="start the local API")
-    server.add_argument("root", type=Path)
+    server.add_argument("root", type=Path, nargs="?", default=Path.home() / ".voice-memory")
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()

@@ -3,6 +3,11 @@
   "identifier": "default",
   "description": "Minimal local-only capability set",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [{"name": "binaries/voice-memory-node", "sidecar": true, "args": true}]
+    }
+  ]
 }
-

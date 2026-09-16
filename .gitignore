@@ -4,4 +4,6 @@ __pycache__/
 *.pyc
 .voice-memory/
 dist/
-
+desktop/dist/
+desktop/build/
+desktop/src-tauri/binaries/
