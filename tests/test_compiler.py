@@ -19,6 +19,9 @@ def test_compiler_exposes_uncertainty():
 
 def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):
     record = demo_record()
+    record.transcript_provider = "fixture"
+    record.transcript_model = "fixture-v1"
+    record.transcript_language = "zh"
     audio = tmp_path / "source.m4a"
     audio.write_bytes(b"source-audio")
     record.audio_path = str(audio)
@@ -28,6 +31,9 @@ def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):
     first = (vault / ".voice-memory" / "recordings" / f"{record.id}.json").read_text()
     assert '"schema_version": "voice-memory.record.v1"' in first
     assert '"source_sha256": "' in first
+    assert '"provider": "fixture"' in first
+    assert '"model": "fixture-v1"' in first
+    assert '"language": "zh"' in first
 
     record.context = "第二次编译"
     write_compiled(record, vault)

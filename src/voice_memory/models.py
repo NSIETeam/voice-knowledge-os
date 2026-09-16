@@ -32,6 +32,9 @@ class ConversationRecord:
     company: str | None = None
     project: str | None = None
     sensitivity: str = "private"
+    transcript_provider: str | None = None
+    transcript_model: str | None = None
+    transcript_language: str | None = None
     segments: list[Segment] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -75,4 +78,3 @@ PROFILES: dict[str, dict[str, Any]] = {
         "create_tasks": True,
     },
 }
-
