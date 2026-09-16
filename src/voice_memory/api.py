@@ -7,7 +7,9 @@ from typing import Any
 
 from .ledger import AudioLedger
 from .compiler import write_compiled
+from .jobs import JobStore
 from .models import ConversationRecord, PROFILES, Segment
+from .transcription import FixtureProvider
 
 
 INDEX_HTML = """<!doctype html>
@@ -22,6 +24,7 @@ INDEX_HTML = """<!doctype html>
 
 class VoiceMemoryHandler(BaseHTTPRequestHandler):
     ledger: AudioLedger
+    jobs: JobStore
 
     def _json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -47,7 +50,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path not in ("/ledger/import", "/records/compile"):
+        if self.path not in ("/ledger/import", "/records/compile", "/transcribe"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         length = int(self.headers.get("Content-Length", "0"))
@@ -56,6 +59,10 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             if self.path == "/ledger/import":
                 asset = self.ledger.import_audio(payload["path"], payload.get("sensitivity", "private"))
                 self._json(HTTPStatus.CREATED, asset.__dict__)
+                return
+            if self.path == "/transcribe":
+                job = self.jobs.transcribe(payload["path"], FixtureProvider())
+                self._json(HTTPStatus.CREATED, job.__dict__)
                 return
             record_data = payload["record"]
             record = ConversationRecord(**{key: value for key, value in record_data.items() if key != "segments"})
@@ -70,7 +77,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
 
 
 def serve(root: str, host: str = "127.0.0.1", port: int = 8765) -> None:
-    handler = type("ConfiguredVoiceMemoryHandler", (VoiceMemoryHandler,), {"ledger": AudioLedger(root)})
+    handler = type("ConfiguredVoiceMemoryHandler", (VoiceMemoryHandler,), {"ledger": AudioLedger(root), "jobs": JobStore(root)})
     server = ThreadingHTTPServer((host, port), handler)
     print(f"Voice Memory listening on http://{host}:{port}")
     server.serve_forever()
