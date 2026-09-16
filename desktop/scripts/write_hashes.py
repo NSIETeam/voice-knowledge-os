@@ -20,7 +20,7 @@ def main() -> None:
         raise SystemExit("no Tauri bundle directories found")
     for bundle_dir in bundle_dirs:
         files = sorted(path for path in bundle_dir.rglob("*") if path.is_file() and path.name != "SHA256SUMS.txt")
-        manifest = "".join(f"{digest(path)}  {path.relative_to(bundle_dir)}\n" for path in files)
+        manifest = "".join(f"{digest(path)}  {path.relative_to(bundle_dir).as_posix()}\n" for path in files)
         (bundle_dir / "SHA256SUMS.txt").write_text(manifest, encoding="utf-8")
 
 
