@@ -1,6 +1,7 @@
 import { Command } from '@tauri-apps/plugin-shell';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const status = document.querySelector('#status');
 const recordStatus = document.querySelector('#recordStatus');
@@ -13,6 +14,7 @@ const systemAudioStatus = document.querySelector('#systemAudioStatus');
 let nodeProcess;
 let nodeStartPromise;
 let appIsClosing = false;
+let closeCleanupStarted = false;
 const apiUrl = 'http://127.0.0.1:8765';
 let currentAsset;
 let lastCompletedJob;
@@ -126,11 +128,22 @@ async function startNode() {
   }
 }
 
-window.addEventListener('beforeunload', () => {
+void getCurrentWindow().onCloseRequested(async (event) => {
+  if (!nodeProcess && !nodeStartPromise) return;
+  event.preventDefault();
+  if (closeCleanupStarted) return;
+  closeCleanupStarted = true;
   appIsClosing = true;
+  if (nodeStartPromise) {
+    try { await nodeStartPromise; } catch { /* nothing to stop */ }
+  }
   const child = nodeProcess;
   nodeProcess = null;
-  if (child) void child.kill().catch((error) => console.warn('could not stop local sidecar', error));
+  if (child) {
+    try { await child.kill(); }
+    catch (error) { console.warn('could not stop local sidecar', error); }
+  }
+  await getCurrentWindow().destroy();
 });
 
 async function check() {
