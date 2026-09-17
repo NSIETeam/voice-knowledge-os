@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from voice_memory.cli import demo_record
@@ -59,6 +61,42 @@ def test_compiler_does_not_fabricate_summary_or_tasks_without_analysis():
     output = compile_record(demo_record())
     assert "不会自动创建任务" in output
     assert "待从“方案与决策”处理器确认行动项" not in output
+
+
+def test_compiler_keeps_multiple_profile_views_without_changing_the_record(tmp_path):
+    record = demo_record()
+    vault = tmp_path / "vault"
+    decision = {
+        "schema_version": "voice-memory.analysis.v1",
+        "provider": "ollama-local",
+        "model": "fixture-model",
+        "profile": "decision",
+        "source_transcript_sha256": transcript_fingerprint(record),
+        "summary": {"text": "决策视角结论", "evidence_ids": ["seg-0001"]},
+        "findings": [{"kind": "decision", "text": "保留原始记录模式", "evidence_ids": ["seg-0001"]}],
+    }
+    knowledge = {
+        **decision,
+        "profile": "knowledge",
+        "summary": {"text": "知识视角结论", "evidence_ids": ["seg-0002"]},
+        "findings": [{"kind": "claims", "text": "另一个观察角度", "evidence_ids": ["seg-0002"]}],
+    }
+
+    canonical = write_compiled(record, vault, analysis=decision)
+    write_compiled(record, vault, analysis=knowledge)
+
+    sidecar_path = vault / ".voice-memory" / "recordings" / f"{record.id}.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert sidecar["record"]["primary_mode"] == "decision"
+    assert set(sidecar["analysis_views"]) == {"decision", "knowledge"}
+    assert "决策视角结论" in canonical.read_text(encoding="utf-8")
+    assert "知识视角结论" in (vault / "Recordings" / "Views" / record.id / "knowledge.md").read_text(encoding="utf-8")
+    assert f"[[Recordings/Views/{record.id}/knowledge|知识学习]]" in canonical.read_text(encoding="utf-8")
+
+    record.segments[0].text = "转写被人工校正"
+    write_compiled(record, vault)
+    assert "本机模型整理建议（已过期）" in canonical.read_text(encoding="utf-8")
+    assert "本机模型整理建议（已过期）" in (vault / "Recordings" / "Views" / record.id / "knowledge.md").read_text(encoding="utf-8")
 
 
 def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):

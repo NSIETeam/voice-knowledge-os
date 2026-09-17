@@ -157,6 +157,7 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
                 assert model == "fixture-model"
 
             def process(self, record):
+                finding_kind = "actions" if record.primary_mode == "decision" else "concepts"
                 return {
                     "schema_version": "voice-memory.analysis.v1",
                     "provider": "ollama-local",
@@ -165,7 +166,7 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
                     "source_transcript_sha256": transcript_fingerprint(record),
                     "generated_at": "2026-09-17T00:00:00+00:00",
                     "summary": {"text": "有证据支持的本机候选总结", "evidence_ids": ["seg-1"]},
-                    "findings": [{"kind": "concepts", "text": "一个可核验概念", "evidence_ids": ["seg-1"]}],
+                    "findings": [{"kind": finding_kind, "text": "一个可核验概念", "evidence_ids": ["seg-1"]}],
                 }
 
         monkeypatch.setattr(api, "LocalOllamaProcessor", StubSemanticProcessor)
@@ -206,7 +207,7 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
         reprocess_request = urllib.request.Request(
             f"{base}/records/{semantic_record['record_id']}/reprocess",
             data=json.dumps({
-                "primary_mode": "knowledge", "processor_endpoint": "http://127.0.0.1:11434",
+                "primary_mode": "decision", "processor_endpoint": "http://127.0.0.1:11434",
                 "processor_model": "fixture-model",
             }).encode(),
             headers={"Content-Type": "application/json"},
@@ -214,15 +215,21 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
         )
         with urllib.request.urlopen(reprocess_request) as response:
             reprocessed = json.load(response)
+        assert reprocessed["analysis"]["profile"] == "decision"
         assert reprocessed["analysis"]["source_transcript_sha256"] == transcript_fingerprint(
             ConversationRecord(
                 **{key: value for key, value in reprocessed["record"].items() if key != "segments"},
                 segments=[Segment(**segment) for segment in reprocessed["record"]["segments"]],
             )
         )
-        assert len(json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))["correction_history"]) == 1
+        semantic_sidecar = json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))
+        assert semantic_sidecar["record"]["primary_mode"] == "knowledge"
+        assert set(semantic_sidecar["analysis_views"]) == {"knowledge", "decision"}
+        assert len(semantic_sidecar["correction_history"]) == 1
         refreshed_markdown = Path(semantic_record["path"]).read_text(encoding="utf-8")
-        assert "本机模型整理建议（待审核）" in refreshed_markdown
-        assert "有证据支持的本机候选总结" in refreshed_markdown
+        assert "本机模型整理建议（已过期）" in refreshed_markdown
+        decision_view = Path(reprocessed["view_path"]).read_text(encoding="utf-8")
+        assert "本机模型整理建议（待审核）" in decision_view
+        assert "有证据支持的本机候选总结" in decision_view
     finally:
         server.shutdown()

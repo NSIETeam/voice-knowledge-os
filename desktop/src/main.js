@@ -273,6 +273,8 @@ document.querySelector('#ollamaModel').addEventListener('input', () => {
 
 reanalyzeButton.addEventListener('click', async () => {
   if (!reviewRecord) return;
+  const selectedProfile = document.querySelector('#profile').value;
+  const selectedProfileName = document.querySelector('#profile').selectedOptions[0]?.textContent || selectedProfile;
   reanalyzeButton.disabled = true;
   reviewStatus.textContent = '正在本机重新整理当前已校正转写…';
   try {
@@ -286,9 +288,9 @@ reanalyzeButton.addEventListener('click', async () => {
     if (!refreshed.ok) throw new Error(`刷新记录失败：HTTP ${refreshed.status}`);
     const sidecar = await refreshed.json();
     reviewRecord = sidecar.record;
-    document.querySelector('#profile').value = reviewRecord.primary_mode;
+    document.querySelector('#profile').value = selectedProfile;
     renderReview(reviewRecord);
-    reviewStatus.textContent = '本机整理完成；结果已关联当前转写，仍需逐条核验。';
+    reviewStatus.textContent = `已生成“${selectedProfileName}”处理视角：${result.view_path}；结果仍需逐条核验。`;
   } catch (error) {
     reviewStatus.textContent = `重新整理失败：${error.message}`;
     reanalyzeButton.disabled = !reviewRecord || !document.querySelector('#ollamaModel').value.trim();

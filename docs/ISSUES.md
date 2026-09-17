@@ -97,7 +97,8 @@ Turn one immutable record into multiple processing views without duplicating or 
 
 - Ships knowledge, decision, interview, negotiation, relationship, evidence, and operations profiles.
 - Profile output lists the extraction contract and evidence references.
-- Re-running a profile updates only managed blocks.
+- Re-running the primary profile updates only its managed blocks; other profiles are stored as independent views without changing the source record or replacing prior analyses.
+- Correcting the transcript marks every profile view stale until that view is reprocessed against the corrected evidence.
 - A user-authored block remains byte-for-byte unchanged.
 - Optional local-model output is clearly marked as unreviewed; every summary/finding must cite valid source segment IDs and invalid citations are rejected.
 - A missing local model produces an explicit transcript-only note, never a fabricated summary or task.

@@ -7,6 +7,7 @@ import mimetypes
 import re
 import threading
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -203,14 +204,14 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 data = dict(sidecar["record"])
                 record = ConversationRecord(**{key: value for key, value in data.items() if key != "segments"})
                 record.segments = [Segment(**segment) for segment in data.get("segments", [])]
-                if "primary_mode" in payload:
-                    if payload["primary_mode"] not in PROFILES:
-                        raise ValueError("unknown processing profile")
-                    record.primary_mode = payload["primary_mode"]
+                profile = payload.get("primary_mode", record.primary_mode)
+                if profile not in PROFILES:
+                    raise ValueError("unknown processing profile")
+                processing_record = replace(record, primary_mode=profile)
                 analysis = LocalOllamaProcessor(
                     payload.get("processor_endpoint", "http://127.0.0.1:11434"),
                     payload.get("processor_model", ""),
-                ).process(record)
+                ).process(processing_record)
                 vault = sidecar_path.parent.parent.parent
                 write_compiled(
                     record,
@@ -219,7 +220,11 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                     analysis=analysis,
                 )
                 updated = json.loads(sidecar_path.read_text(encoding="utf-8"))
-                self._json(HTTPStatus.OK, {"record": updated["record"], "analysis": updated.get("analysis")})
+                self._json(HTTPStatus.OK, {
+                    "record": updated["record"],
+                    "analysis": updated.get("analysis_views", {}).get(profile),
+                    "view_path": updated.get("analysis_view_paths", {}).get(profile),
+                })
             except (FileNotFoundError, KeyError, ValueError, TypeError, json.JSONDecodeError) as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return

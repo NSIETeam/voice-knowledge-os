@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from difflib import unified_diff
@@ -179,7 +180,12 @@ def _model_text(text: str) -> str:
     return escaped.replace("\r", " ").replace("\n", " ")
 
 
-def compile_record(record: ConversationRecord, analysis: dict | None = None) -> str:
+def compile_record(
+    record: ConversationRecord,
+    analysis: dict | None = None,
+    available_views: list[str] | None = None,
+    canonical_profile: str | None = None,
+) -> str:
     profile = PROFILES.get(record.primary_mode, {"name": record.primary_mode, "extract": []})
     people = "\n".join(f"  - {person}" for person in record.people) or "  - 未确认"
     segment_lines = []
@@ -200,6 +206,14 @@ def compile_record(record: ConversationRecord, analysis: dict | None = None) -> 
     ) or "- _处理后将自动生成证据引用。_"
     links = "\n".join(f"- {value}" for value in [*record.people, record.company, record.project] if value)
     links = links or "- _暂无关联对象。_"
+    if available_views:
+        canonical_profile = canonical_profile or record.primary_mode
+        view_links = "\n".join(
+            f"- [[{('Recordings/' + record.title) if mode == canonical_profile else ('Recordings/Views/' + record.id + '/' + mode)}|{PROFILES[mode]['name']}]]"
+            for mode in sorted(available_views)
+            if mode != record.primary_mode
+        )
+        links += "\n\n### 其他处理视角\n\n" + view_links
     actions = "_未运行语义处理；不会自动创建任务。_"
     metadata = {
         "voice_memory_id": record.id,
@@ -288,11 +302,31 @@ def write_compiled(
     rollback_dir = machine_root / "rollback" / record.id
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     previous_sidecar = sidecar_dir / f"{record.id}.json"
-    if analysis is None and previous_sidecar.is_file():
+    previous: dict = {}
+    if previous_sidecar.is_file():
         try:
-            analysis = json.loads(previous_sidecar.read_text(encoding="utf-8")).get("analysis")
+            previous = json.loads(previous_sidecar.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError("existing Voice Memory sidecar is unreadable; refusing to discard its analysis") from error
+    analysis_views = dict(previous.get("analysis_views", {}))
+    legacy_analysis = previous.get("analysis")
+    if not analysis_views and isinstance(legacy_analysis, dict):
+        legacy_profile = legacy_analysis.get("profile") or previous.get("processing_profile")
+        if legacy_profile not in PROFILES:
+            raise ValueError("existing Voice Memory sidecar contains an invalid processing profile")
+        analysis_views[legacy_profile] = legacy_analysis
+    elif legacy_analysis is not None and not isinstance(legacy_analysis, dict):
+        raise ValueError("existing Voice Memory sidecar contains an invalid analysis")
+    for mode, view in analysis_views.items():
+        if mode not in PROFILES or not isinstance(view, dict) or view.get("profile") != mode:
+            raise ValueError("existing Voice Memory sidecar contains an invalid processing view")
+    if analysis is not None:
+        profile = analysis.get("profile")
+        if profile not in PROFILES:
+            raise ValueError("analysis references an unknown processing profile")
+        analysis_views[profile] = analysis
+    primary_analysis = analysis_views.get(record.primary_mode)
+    alternate_views = sorted(mode for mode in analysis_views if mode != record.primary_mode)
     existing_markdown: str | None = None
     if destination.exists():
         with destination.open("r", encoding="utf-8", newline="") as stream:
@@ -301,7 +335,7 @@ def write_compiled(
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         shutil.copyfile(destination, rollback_dir / f"{stamp}.md")
 
-    rendered = compile_record(record, analysis)
+    rendered = compile_record(record, primary_analysis, sorted(analysis_views), record.primary_mode)
     final_markdown = _merge_managed(existing_markdown, rendered) if existing_markdown is not None else rendered
     if existing_markdown is not None:
         diff_dir = machine_root / "diffs" / record.id
@@ -313,6 +347,37 @@ def write_compiled(
         ))
         _atomic_write(diff_dir / f"{stamp}.diff", diff)
     _atomic_write(destination, final_markdown)
+    view_paths: dict[str, str] = {}
+    for mode in alternate_views:
+        view_record = replace(record, primary_mode=mode)
+        view_destination = vault_path / "Recordings" / "Views" / record.id / f"{mode}.md"
+        view_destination.parent.mkdir(parents=True, exist_ok=True)
+        existing_view: str | None = None
+        if view_destination.exists():
+            with view_destination.open("r", encoding="utf-8", newline="") as stream:
+                existing_view = stream.read()
+        rendered_view = compile_record(
+            view_record,
+            analysis_views[mode],
+            sorted(analysis_views),
+            canonical_profile=record.primary_mode,
+        )
+        final_view = _merge_managed(existing_view, rendered_view) if existing_view is not None else rendered_view
+        if existing_view is not None:
+            stamp_view = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            view_rollback = rollback_dir / f"{mode}-{stamp_view}.md"
+            view_rollback.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(view_destination, view_rollback)
+            view_diff_dir = machine_root / "diffs" / record.id
+            view_diff = "".join(unified_diff(
+                existing_view.splitlines(keepends=True),
+                final_view.splitlines(keepends=True),
+                fromfile=f"{view_destination.name} (before)",
+                tofile=f"{view_destination.name} (after)",
+            ))
+            _atomic_write(view_diff_dir / f"{mode}-{stamp_view}.diff", view_diff)
+        _atomic_write(view_destination, final_view)
+        view_paths[mode] = str(view_destination)
     audio = Path(record.audio_path).expanduser()
     source_sha256 = None
     if audio.is_file():
@@ -339,7 +404,9 @@ def write_compiled(
         "model": record.transcript_model,
         "language": record.transcript_language,
         "processing_profile": record.primary_mode,
-        "analysis": analysis,
+        "analysis": primary_analysis,
+        "analysis_views": analysis_views,
+        "analysis_view_paths": {record.primary_mode: str(destination), **view_paths},
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "markdown_path": str(destination),
         "record": record.to_dict(),
