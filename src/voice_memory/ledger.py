@@ -99,8 +99,17 @@ class AudioLedger:
         record_path.write_text(json.dumps(asdict(asset), ensure_ascii=False, indent=2), encoding="utf-8")
         return asset
 
-    def import_stream(self, stream, content_length: int, original_name: str, sensitivity: str = "private") -> AudioAsset:
+    def import_stream(
+        self,
+        stream,
+        content_length: int,
+        original_name: str,
+        sensitivity: str = "private",
+        source_path: str = "loopback-upload",
+    ) -> AudioAsset:
         """Stream a loopback upload to disk without buffering the recording in memory."""
+        if source_path not in {"loopback-upload", "file-import", "microphone-capture", "system-audio-loopback"}:
+            raise ValueError("unsupported audio source")
         if content_length <= 0:
             raise ValueError("audio upload is empty")
         if content_length > 8 * 1024 * 1024 * 1024:
@@ -125,11 +134,12 @@ class AudioLedger:
                 temporary.replace(object_path)
         finally:
             temporary.unlink(missing_ok=True)
+        asset_key = sha256 if source_path == "loopback-upload" else f"{sha256}:{source_path}"
         asset = AudioAsset(
-            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"voice-memory:{sha256}")),
+            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"voice-memory:{asset_key}")),
             sha256=sha256,
             original_name=original_name,
-            source_path="loopback-upload",
+            source_path=source_path,
             stored_path=str(object_path),
             size_bytes=content_length,
             imported_at=datetime.now(timezone.utc).isoformat(),

@@ -102,12 +102,17 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
         upload_request = urllib.request.Request(
             f"{base}/ledger/upload",
             data=b"fixture audio bytes",
-            headers={"Content-Type": "application/octet-stream", "X-File-Name": "sample.webm"},
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-File-Name": "sample.webm",
+                "X-Audio-Source": "system-audio-loopback",
+            },
             method="POST",
         )
         with urllib.request.urlopen(upload_request) as response:
             assert response.status == 201
             asset = json.load(response)
+        assert asset["source_path"] == "system-audio-loopback"
         transcription_request = urllib.request.Request(
             f"{base}/transcribe",
             data=json.dumps({"asset_id": asset["id"], "provider": "fixture"}).encode(),

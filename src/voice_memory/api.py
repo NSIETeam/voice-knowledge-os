@@ -254,7 +254,8 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 original_name = unquote(self.headers.get("X-File-Name", "recording.audio"))
                 original_name = original_name.replace("\\", "/").split("/")[-1].strip()
                 original_name = "".join(char for char in original_name if ord(char) >= 32)[:255] or "recording.audio"
-                asset = self.ledger.import_stream(self.rfile, length, original_name)
+                source_path = self.headers.get("X-Audio-Source", "loopback-upload")
+                asset = self.ledger.import_stream(self.rfile, length, original_name, source_path=source_path)
                 self._json(HTTPStatus.CREATED, asset.__dict__)
             except (ValueError, OSError) as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})

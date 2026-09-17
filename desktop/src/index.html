@@ -29,6 +29,8 @@
     <div class="card"><strong>采集音频</strong>
       <p id="recordStatus">未开始</p>
       <button id="record">开始麦克风录音</button>
+      <p id="systemAudioStatus">Windows 系统音频录制仅捕获默认扬声器/耳机输出；可与麦克风录音同时使用。</p>
+      <button id="systemAudioRecord">开始 Windows 系统音频录音</button>
       <label class="field"><span>导入音频</span><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.flac,.ogg,.webm" /><button id="importAudio" disabled>导入账本</button></label>
       <p id="assetStatus">尚未选择音频</p>
     </div>
@@ -40,7 +42,7 @@
         <label class="field"><span>whisper.cpp 程序</span><input id="whisperPath" placeholder="选择 whisper-cli / whisper-cli.exe" /><button id="chooseWhisper">选择程序</button></label>
         <label class="field"><span>Whisper 模型</span><input id="modelPath" placeholder="选择 ggml 模型文件" /><button id="chooseModel">选择模型</button></label>
         <label class="field"><span>FFmpeg 程序</span><input id="ffmpegPath" placeholder="ffmpeg（PATH）或选择 ffmpeg.exe" /><button id="chooseFfmpeg">选择程序</button></label>
-        <p>音频与转写只在本机处理。首次使用需选择 whisper.cpp 程序和模型。浏览器录音及 M4A/WebM 等格式需要 FFmpeg；WAV、MP3、FLAC、OGG 可直接处理。</p>
+        <p>音频与转写只在本机处理。首次使用需选择 whisper.cpp 程序和模型。浏览器录音、WASAPI 系统录音及非 16 kHz/16-bit/单声道的 WAV 需要本机 FFmpeg 转码；符合目标格式的 WAV、MP3、FLAC、OGG 可直接处理。</p>
       </details>
       <details><summary>本地语义整理（可选，Ollama）</summary>
         <label class="field"><span>Ollama 本机地址</span><input id="ollamaEndpoint" placeholder="http://127.0.0.1:11434" /><span></span></label>

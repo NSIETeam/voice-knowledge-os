@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import wave
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
@@ -33,6 +34,21 @@ class TranscriptionProvider(Protocol):
 
     def transcribe(self, audio_path: str | Path) -> Transcript:
         ...
+
+
+def _wav_needs_whisper_normalization(audio_path: Path) -> bool:
+    try:
+        with wave.open(str(audio_path), "rb") as source:
+            return not (
+                source.getcomptype() == "NONE"
+                and source.getsampwidth() == 2
+                and source.getnchannels() == 1
+                and source.getframerate() == 16_000
+            )
+    except (wave.Error, EOFError, OSError):
+        # whisper.cpp's CLI accepts 16-bit WAV; float and malformed WAVs must
+        # be converted locally before they reach that parser.
+        return True
 
 
 def _run_local_command(command: list[str], label: str, missing_message: str | None = None) -> None:
@@ -110,7 +126,9 @@ class WhisperCppProvider:
                 except OSError:
                     shutil.copyfile(audio, named_input)
             whisper_input = named_input
-            if safe_suffix not in {".wav", ".mp3", ".flac", ".ogg"}:
+            if safe_suffix not in {".wav", ".mp3", ".flac", ".ogg"} or (
+                safe_suffix == ".wav" and _wav_needs_whisper_normalization(named_input)
+            ):
                 if not self.ffmpeg_executable:
                     raise RuntimeError("This audio format needs FFmpeg; choose ffmpeg or convert the file to WAV, MP3, FLAC, or OGG")
                 normalized = working_dir / "normalized.wav"

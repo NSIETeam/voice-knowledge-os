@@ -137,13 +137,14 @@ Open a record from Obsidian, play evidence, confirm speakers, and recompile a se
 **Labels:** `capture`, `macos`, `windows`
 
 ### Goal
-Add microphone and system-audio capture using platform-native adapters, retaining separate streams.
+Add microphone and system-audio capture using platform-native adapters, retaining separate streams. Windows now has WASAPI loopback capture for the default output and stores that asset with `system-audio-loopback` provenance; macOS native system capture remains open.
 
 ### Acceptance criteria
 
-- Mic and system streams remain separately identifiable in the ledger.
+- Windows microphone and WASAPI system-output streams remain separately identifiable in the ledger.
 - Permission denial is actionable and does not lose an in-progress recording.
-- Start/stop/recovery behavior is covered by a real device test matrix.
+- Windows start/stop is exercised with active playback, silence intervals, output-device removal, API unavailable, and simultaneous microphone capture on real hardware; recoverable local capture files are retained on failures.
+- macOS capture permissions and start/stop/recovery behavior pass a separate Apple Silicon real-device matrix before the issue is closed.
 - The capture adapter is replaceable and does not leak OS-specific paths into the core schema.
 
 ## 11. ClawMaster execution boundary

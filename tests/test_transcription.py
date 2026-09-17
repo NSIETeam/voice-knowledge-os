@@ -1,9 +1,22 @@
 import json
+import io
+import struct
 import tempfile
+import wave
 from pathlib import Path
 
 from voice_memory.jobs import JobStore
 from voice_memory.transcription import FixtureProvider
+
+
+def _pcm16_mono_16khz_wav():
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16_000)
+        output.writeframes(struct.pack("<hhhh", 0, 100, -100, 0))
+    return buffer.getvalue()
 
 
 def test_fixture_transcription_is_replayable_and_persisted():
@@ -36,7 +49,7 @@ def test_whisper_outputs_are_kept_out_of_immutable_audio_directory(tmp_path, mon
     objects = tmp_path / "objects"
     objects.mkdir()
     audio = objects / "content-addressed-object"
-    original = b"immutable source bytes"
+    original = _pcm16_mono_16khz_wav()
     audio.write_bytes(original)
     output_paths = []
 
@@ -88,6 +101,40 @@ def test_web_audio_is_normalized_with_ffmpeg_in_temporary_workspace(tmp_path, mo
     assert commands[0][:8] == ["ffmpeg", "-nostdin", "-y", "-i", commands[0][4], "-vn", "-ac", "1"]
     assert commands[1][commands[1].index("-f") + 1].endswith("normalized.wav")
     assert not working_directories[0].exists()
+    assert audio.read_bytes() == original
+
+
+def test_wasapi_float_stereo_wav_is_normalized_before_whisper(tmp_path, monkeypatch):
+    from voice_memory.transcription import WhisperCppProvider
+
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    audio = objects / "content-addressed-object"
+    samples = struct.pack("<ffff", 0.0, 0.25, -0.25, 0.0)
+    original = (
+        b"RIFF" + struct.pack("<I", 36 + len(samples)) + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 3, 2, 48_000, 48_000 * 2 * 4, 2 * 4, 32)
+        + b"data" + struct.pack("<I", len(samples)) + samples
+    )
+    audio.write_bytes(original)
+    commands = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        if command[0] == "ffmpeg":
+            Path(command[-1]).write_bytes(b"normalized pcm16 wav")
+        else:
+            output_base = Path(command[command.index("-of") + 1])
+            output_base.with_suffix(".json").write_text(json.dumps({"transcription": []}), encoding="utf-8")
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", fake_run)
+    WhisperCppProvider("whisper-cli", "model.bin", source_name="system-audio.wav").transcribe(audio)
+
+    assert commands[0][0] == "ffmpeg"
+    assert commands[0][commands[0].index("-ar") + 1] == "16000"
+    assert commands[0][commands[0].index("-ac") + 1] == "1"
+    assert commands[0][commands[0].index("-c:a") + 1] == "pcm_s16le"
+    assert commands[1][commands[1].index("-f") + 1].endswith("normalized.wav")
     assert audio.read_bytes() == original
 
 

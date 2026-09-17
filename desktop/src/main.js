@@ -1,5 +1,6 @@
 import { Command } from '@tauri-apps/plugin-shell';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 
 const status = document.querySelector('#status');
 const recordStatus = document.querySelector('#recordStatus');
@@ -7,6 +8,8 @@ const assetStatus = document.querySelector('#assetStatus');
 const processStatus = document.querySelector('#processStatus');
 const assetImportButton = document.querySelector('#importAudio');
 const transcribeButton = document.querySelector('#transcribe');
+const systemAudioButton = document.querySelector('#systemAudioRecord');
+const systemAudioStatus = document.querySelector('#systemAudioStatus');
 let nodeProcess;
 let nodeStartPromise;
 let appIsClosing = false;
@@ -56,11 +59,11 @@ choosePath('chooseWhisper', 'whisperPath', {directory:false, multiple:false, tit
 choosePath('chooseModel', 'modelPath', {directory:false, multiple:false, title:'选择 Whisper 模型', filters:[{name:'Whisper 模型', extensions:['bin','gguf']}]});
 choosePath('chooseFfmpeg', 'ffmpegPath', {directory:false, multiple:false, title:'选择 FFmpeg 程序', filters:[{name:'FFmpeg', extensions:['exe','bin','command']}]});
 
-async function uploadAudio(blob, name) {
+async function uploadAudio(blob, name, source = 'loopback-upload') {
   assetStatus.textContent = '正在写入本地音频账本…';
   const response = await fetch(`${apiUrl}/ledger/upload`, {
     method:'POST',
-    headers:{'Content-Type':'application/octet-stream', 'X-File-Name':encodeURIComponent(name)},
+    headers:{'Content-Type':'application/octet-stream', 'X-File-Name':encodeURIComponent(name), 'X-Audio-Source':source},
     body:blob,
   });
   const result = await response.json();
@@ -163,6 +166,40 @@ document.querySelector('#retry').addEventListener('click', async () => {
 });
 let recorder;
 let chunks = [];
+let systemAudioRecording = false;
+if (!navigator.userAgent.includes('Windows')) {
+  systemAudioButton.hidden = true;
+  systemAudioStatus.hidden = true;
+}
+
+systemAudioButton.addEventListener('click', async () => {
+  systemAudioButton.disabled = true;
+  try {
+    if (!systemAudioRecording) {
+      const recoveryPath = await invoke('start_system_audio_capture');
+      systemAudioRecording = true;
+      systemAudioButton.textContent = '停止并保存系统音频';
+      systemAudioStatus.textContent = `正在本机捕获系统播放声音；麦克风录音可同时进行。临时录音文件：${recoveryPath}`;
+      return;
+    }
+    systemAudioRecording = false;
+    systemAudioButton.textContent = '开始 Windows 系统音频录音';
+    const asset = await invoke('stop_system_audio_capture');
+    if (currentAsset?.id !== asset.id) lastCompletedJob = null;
+    currentAsset = asset;
+    assetStatus.textContent = `已保存系统音频：${asset.original_name} · ${asset.size_bytes} bytes · SHA-256 ${asset.sha256.slice(0, 12)}…`;
+    systemAudioStatus.textContent = '系统音频已写入本地音频账本。';
+    refreshActions();
+    if (!document.querySelector('#recordTitle').value) document.querySelector('#recordTitle').value = `系统录音 ${localTimestamp()}`;
+  } catch (error) {
+    if (systemAudioRecording) systemAudioRecording = false;
+    systemAudioButton.textContent = '开始 Windows 系统音频录音';
+    systemAudioStatus.textContent = `系统音频录制失败：${error.message || error}`;
+  } finally {
+    systemAudioButton.disabled = false;
+  }
+});
+
 document.querySelector('#record').addEventListener('click', async (event) => {
   const button = event.currentTarget;
   if (recorder?.state === 'recording') { recorder.stop(); button.textContent = '开始录音'; return; }
@@ -176,7 +213,7 @@ document.querySelector('#record').addEventListener('click', async (event) => {
       try {
         const mimeSubtype = (recorder.mimeType || blob.type || 'audio/webm').split('/')[1]?.split(';')[0]?.toLowerCase() || 'webm';
         const extension = ({'mp4':'m4a', 'x-wav':'wav'})[mimeSubtype] || mimeSubtype;
-        await uploadAudio(blob, `microphone-${Date.now()}.${extension}`);
+        await uploadAudio(blob, `microphone-${Date.now()}.${extension}`, 'microphone-capture');
         recordStatus.textContent = '录音已写入本地音频账本';
         if (!document.querySelector('#recordTitle').value) document.querySelector('#recordTitle').value = `录音 ${localTimestamp()}`;
       } catch (error) { recordStatus.textContent = `写入失败：${error.message}`; }
