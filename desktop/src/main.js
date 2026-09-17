@@ -188,6 +188,7 @@ async function startNode() {
       status.textContent = `本地处理节点启动失败：${error}`;
     });
     nodeProcess = await command.spawn();
+    if (navigator.userAgent.includes('Mac')) await invoke('register_sidecar_pid', {pid: nodeProcess.pid});
     return nodeProcess;
   })();
   try {
@@ -213,6 +214,7 @@ async function stopNodeForExit() {
     try {
       if (navigator.userAgent.includes('Mac')) await invoke('terminate_sidecar_tree', {rootPid: child.pid});
       else await child.kill();
+      if (navigator.userAgent.includes('Mac')) await invoke('clear_sidecar_pid');
     }
     catch (error) {
       nodeProcess = child;

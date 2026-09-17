@@ -23,6 +23,8 @@ pub fn run() {
         approve_app_exit,
         mark_ui_ready,
         terminate_sidecar_tree,
+        register_sidecar_pid,
+        clear_sidecar_pid,
     ]);
 
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
@@ -39,7 +41,23 @@ pub fn run() {
                 && !APP_EXIT_APPROVED.load(std::sync::atomic::Ordering::Acquire)
             {
                 api.prevent_exit();
-                let _ = handle.emit("voice-memory://quit-requested", ());
+                let pid = SIDECAR_PID.load(std::sync::atomic::Ordering::Acquire);
+                let result = if pid == 0 {
+                    Ok(())
+                } else {
+                    terminate_sidecar_tree(pid)
+                };
+                match result {
+                    Ok(()) => {
+                        SIDECAR_PID.store(0, std::sync::atomic::Ordering::Release);
+                        APP_EXIT_APPROVED.store(true, std::sync::atomic::Ordering::Release);
+                        handle.exit(0);
+                    }
+                    Err(error) => {
+                        eprintln!("Voice Memory sidecar shutdown failed: {error}");
+                        let _ = handle.emit("voice-memory://quit-requested", ());
+                    }
+                }
             }
         }
     });
@@ -52,11 +70,29 @@ pub fn run() {
 static APP_EXIT_APPROVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static UI_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static SIDECAR_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 #[tauri::command]
 fn mark_ui_ready() {
     #[cfg(target_os = "macos")]
     UI_READY.store(true, std::sync::atomic::Ordering::Release);
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn register_sidecar_pid(pid: u32) -> Result<(), String> {
+    if pid == 0 || pid == std::process::id() {
+        return Err("refusing to register an invalid sidecar PID".into());
+    }
+    SIDECAR_PID.store(pid, std::sync::atomic::Ordering::Release);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn clear_sidecar_pid() {
+    SIDECAR_PID.store(0, std::sync::atomic::Ordering::Release);
 }
 
 #[tauri::command]
