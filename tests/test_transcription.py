@@ -40,7 +40,9 @@ def test_whisper_outputs_are_kept_out_of_immutable_audio_directory(tmp_path, mon
     audio.write_bytes(original)
     output_paths = []
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command, **kwargs):
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         output_base = Path(command[command.index("-of") + 1])
         output_paths.append(output_base)
         output_base.with_suffix(".json").write_text(
@@ -69,7 +71,9 @@ def test_web_audio_is_normalized_with_ffmpeg_in_temporary_workspace(tmp_path, mo
     commands = []
     working_directories = []
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command, **kwargs):
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         commands.append(command)
         if command[0] == "ffmpeg":
             working_directories.append(Path(command[-1]).parent)
@@ -85,3 +89,34 @@ def test_web_audio_is_normalized_with_ffmpeg_in_temporary_workspace(tmp_path, mo
     assert commands[1][commands[1].index("-f") + 1].endswith("normalized.wav")
     assert not working_directories[0].exists()
     assert audio.read_bytes() == original
+
+
+def test_local_command_failures_are_actionable_and_keep_unicode_diagnostics(monkeypatch):
+    import subprocess
+
+    import pytest
+
+    from voice_memory.transcription import _run_local_command
+
+    def missing(_command, **_kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", missing)
+    with pytest.raises(RuntimeError, match="check its executable path"):
+        _run_local_command(["whisper-cli.exe"], "whisper.cpp")
+
+    def denied(_command, **_kwargs):
+        raise PermissionError
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", denied)
+    with pytest.raises(RuntimeError, match="check that the selected file is an executable"):
+        _run_local_command(["whisper-cli.exe"], "whisper.cpp")
+
+    def failed(command, **kwargs):
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
+        raise subprocess.CalledProcessError(1, command, stderr="无法解码音频格式")
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", failed)
+    with pytest.raises(RuntimeError, match="whisper.cpp failed with exit code 1: 无法解码音频格式"):
+        _run_local_command(["whisper-cli.exe"], "whisper.cpp")

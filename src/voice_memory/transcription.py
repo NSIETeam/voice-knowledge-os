@@ -35,6 +35,30 @@ class TranscriptionProvider(Protocol):
         ...
 
 
+def _run_local_command(command: list[str], label: str, missing_message: str | None = None) -> None:
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except FileNotFoundError:
+        raise RuntimeError(missing_message or f"{label} was not found; check its executable path in settings") from None
+    except PermissionError:
+        raise RuntimeError(f"{label} could not be started; check that the selected file is an executable program") from None
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip()
+        if len(detail) > 1600:
+            detail = "…" + detail[-1600:]
+        message = f"{label} failed with exit code {error.returncode}"
+        if detail:
+            message += f": {detail}"
+        raise RuntimeError(message) from None
+
+
 class FixtureProvider:
     """Offline provider used for deterministic replay and acceptance tests."""
 
@@ -90,20 +114,16 @@ class WhisperCppProvider:
                 if not self.ffmpeg_executable:
                     raise RuntimeError("This audio format needs FFmpeg; choose ffmpeg or convert the file to WAV, MP3, FLAC, or OGG")
                 normalized = working_dir / "normalized.wav"
-                try:
-                    subprocess.run(
-                        [self.ffmpeg_executable, "-nostdin", "-y", "-i", str(named_input), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(normalized)],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                except FileNotFoundError as error:
-                    raise RuntimeError("FFmpeg is required for this audio format but was not found") from error
+                _run_local_command(
+                    [self.ffmpeg_executable, "-nostdin", "-y", "-i", str(named_input), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(normalized)],
+                    "FFmpeg",
+                    "FFmpeg is required for this audio format but was not found; select ffmpeg.exe in settings",
+                )
                 whisper_input = normalized
             output_base = working_dir / "transcript"
             output = output_base.with_suffix(".json")
             command = [self.executable, "-m", self.model, "-f", str(whisper_input), "-oj", "-of", str(output_base)]
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            _run_local_command(command, "whisper.cpp")
             payload = json.loads(output.read_text(encoding="utf-8"))
         segments = [
             Segment(
