@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$diagnostics = Join-Path $PWD 'smoke-diagnostics'
+$diagnostics = Join-Path $env:RUNNER_TEMP 'voice-memory-x86_64-pc-windows-msvc-smoke'
 New-Item -ItemType Directory -Force $diagnostics | Out-Null
 $api = 'http://127.0.0.1:8765'
 

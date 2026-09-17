@@ -78,6 +78,36 @@ def test_api_rejects_untrusted_browser_origins_and_simple_content_types(tmp_path
         server.shutdown()
 
 
+def test_tauri_audio_upload_preflight_allows_source_header(tmp_path):
+    from voice_memory.jobs import JobStore
+
+    data_root = tmp_path / "preflight-data"
+    handler = type(
+        "PreflightHandler",
+        (VoiceMemoryHandler,),
+        {"data_root": data_root, "ledger": AudioLedger(data_root), "jobs": JobStore(data_root)},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_port}/ledger/upload",
+        headers={
+            "Origin": "tauri://localhost",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type,x-file-name,x-audio-source",
+        },
+        method="OPTIONS",
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            allowed = {value.strip().lower() for value in response.headers["Access-Control-Allow-Headers"].split(",")}
+            assert response.status == 204
+            assert {"content-type", "x-file-name", "x-audio-source"} <= allowed
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monkeypatch):
     class StubProvider:
         name = "fixture"

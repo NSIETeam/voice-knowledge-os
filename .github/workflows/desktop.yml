@@ -14,19 +14,26 @@ jobs:
     strategy:
       matrix:
         include:
+          - os: macos-14
+            target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Validate acceptance script before packaging
+      - name: Validate Windows acceptance script before packaging
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $tokens = $null
           $parseErrors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$PWD/desktop/scripts/windows-install-smoke.ps1", [ref]$tokens, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+      - name: Validate macOS acceptance script before packaging
+        if: matrix.os == 'macos-14'
+        working-directory: desktop
+        run: python -m py_compile scripts/macos-package-smoke.py
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -79,12 +86,16 @@ jobs:
         working-directory: desktop
         shell: pwsh
         run: ./scripts/windows-install-smoke.ps1
+      - name: Install and launch Apple Silicon macOS app smoke test
+        if: matrix.os == 'macos-14'
+        working-directory: desktop
+        run: python scripts/macos-package-smoke.py
       - name: Upload Windows acceptance diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-acceptance-diagnostics
-          path: desktop/smoke-diagnostics/**
+          name: acceptance-diagnostics-${{ matrix.target }}
+          path: ${{ runner.temp }}/voice-memory-${{ matrix.target }}-smoke/**
           if-no-files-found: warn
       - name: Upload desktop bundles
         if: success()

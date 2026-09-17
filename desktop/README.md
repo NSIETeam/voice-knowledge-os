@@ -2,7 +2,7 @@
 
 This is the Windows/macOS-first Tauri 2 shell. The release workflow bundles the Python core as a PyInstaller sidecar and the shell starts it automatically; development mode can still use a manually started Python node.
 
-The current acceptance workflow targets Windows only; macOS validation reuses the previously built Apple Silicon installer and is out of scope for this Windows pass.
+The desktop workflow builds and checks both Windows x64 and Apple Silicon macOS packages. Mac validation launches the bundled app with an isolated home folder and checks its local service lifecycle.
 
 ## Development
 

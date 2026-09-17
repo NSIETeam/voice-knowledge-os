@@ -3,60 +3,131 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f4ef" />
     <title>Voice Memory</title>
-    <style>
-      :root { color-scheme: light dark; font: 16px system-ui, sans-serif; }
-      body { max-width: 760px; margin: 0 auto; padding: 48px 24px; }
-      .card { border: 1px solid #8885; border-radius: 12px; padding: 20px; margin-top: 18px; }
-      .ok { color: #16833b; } .warn { color: #b15b00; }
-      button { padding: 8px 14px; border-radius: 8px; border: 1px solid #8888; }
-      input, textarea, select { font: inherit; padding: 7px; border-radius: 6px; border: 1px solid #8888; box-sizing: border-box; }
-      input, textarea { width: 100%; } textarea { min-height: 64px; resize: vertical; }
-      .review-segment { border-top: 1px solid #8884; padding: 14px 0; }
-      .review-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-      .review-meta input { width: 180px; } .review-meta select { width: 120px; }
-      .badge { border-radius: 999px; padding: 3px 8px; font-size: .85em; background: #8883; }
-      .badge.confirmed { color: #16833b; } .badge.suggestion { color: #9a6500; } .badge.unknown { color: #666; }
-      .field { display: grid; grid-template-columns: minmax(120px, 180px) 1fr auto; gap: 8px; align-items: center; margin: 10px 0; }
-      .field input { min-width: 0; }
-      @media (max-width: 640px) { .field { grid-template-columns: 1fr auto; } .field label { grid-column: 1 / -1; } }
-    </style>
   </head>
   <body>
-    <h1>Voice Memory</h1>
-    <p>Local-first voice knowledge compiler</p>
-    <div class="card"><strong>本地处理节点</strong><p id="status">检查中…</p><button id="retry">重新检查</button></div>
-    <div class="card"><strong>采集音频</strong>
-      <p id="recordStatus">未开始</p>
-      <button id="record">开始麦克风录音</button>
-      <p id="systemAudioStatus">Windows 系统音频录制仅捕获默认扬声器/耳机输出；可与麦克风录音同时使用。</p>
-      <button id="systemAudioRecord">开始 Windows 系统音频录音</button>
-      <label class="field"><span>导入音频</span><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.flac,.ogg,.webm" /><button id="importAudio" disabled>导入账本</button></label>
-      <p id="assetStatus">尚未选择音频</p>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <a class="brand" href="#top" aria-label="Voice Memory 工作台">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span class="brand-type"><strong>Voice Memory</strong><small>LOCAL KNOWLEDGE STUDIO</small></span>
+        </a>
+        <div class="side-label">工作区</div>
+        <nav class="side-nav">
+          <a class="nav-link active" href="#capture"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="2"/></svg>新建记录<span class="nav-arrow">↗</span></a>
+          <a class="nav-link" href="#review"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h7l3 3v10H5z"/><path d="M12 3.5v3h3M7.5 10h5M7.5 13h5"/></svg>证据复核</a>
+          <a class="nav-link" href="#settings"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 6h13M3.5 14h13"/><circle cx="8" cy="6" r="1.7"/><circle cx="12" cy="14" r="1.7"/></svg>本地设置</a>
+        </nav>
+        <div class="sidebar-spacer"></div>
+        <div class="side-flow">
+          <div class="side-label">一段谈话，三步沉淀</div>
+          <div class="flow-step"><span>01</span><div><strong>采集原声</strong><small>音频留在这台设备</small></div></div>
+          <div class="flow-step"><span>02</span><div><strong>本地整理</strong><small>转写与证据片段</small></div></div>
+          <div class="flow-step"><span>03</span><div><strong>复核归档</strong><small>写入你的 Obsidian</small></div></div>
+        </div>
+        <div class="sidebar-foot"><span class="privacy-dot"></span><span>数据仅保存在本机</span><span class="lock-icon" aria-hidden="true">⌑</span></div>
+      </aside>
+
+      <main id="top" class="main-area">
+        <header class="topbar">
+          <div class="breadcrumb"><span>工作区</span><span class="crumb-slash">/</span><strong>新建记录</strong></div>
+          <div class="topbar-right"><span class="local-pill"><span></span>本机模式</span><span class="topbar-date" id="todayDate">VOICE · MEMORY</span></div>
+        </header>
+
+        <div class="content-wrap">
+          <section class="page-intro" aria-labelledby="pageTitle">
+            <div class="intro-copy"><div class="eyebrow"><span class="eyebrow-rule"></span>把谈话，变成可核验的知识</div>
+              <h1 id="pageTitle">留住原声，<em>理清思路。</em></h1>
+              <p>从真实对话开始。转写、整理与复核都在本机完成，每条结论都能回到原文。</p>
+            </div>
+            <div class="intro-index"><span>VOICE</span><b>01</b><span>OF 03</span></div>
+          </section>
+
+          <div class="workspace-grid">
+            <div class="primary-column">
+              <section id="capture" class="panel capture-panel" aria-labelledby="captureTitle">
+                <div class="panel-heading">
+                  <div class="step-index">01</div><div><div class="panel-kicker">CAPTURE</div><h2 id="captureTitle">从一段声音开始</h2></div>
+                  <span class="panel-tag">原始音频将被保留</span>
+                </div>
+                <p id="recordStatus" class="capture-status">选择录音或导入已有音频</p>
+                <div class="capture-actions">
+                  <button id="record" class="record-button" type="button"><span class="record-glyph" aria-hidden="true"><span></span></span><span class="record-label">开始麦克风录音</span><span class="record-hint">点击开始</span></button>
+                  <button id="systemAudioRecord" class="system-button" type="button"><svg class="system-glyph" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 8v4M7 5.5v9M10.5 3.5v13M14 6v8M17 8.5v3"/></svg><span>录制系统声音</span><span class="windows-only">WINDOWS</span></button>
+                </div>
+                <p id="systemAudioStatus" class="system-audio-status">Windows 将捕获默认扬声器或耳机声音，可与麦克风同时录制。</p>
+                <div class="or-divider"><span>或者导入已有录音</span></div>
+                <div class="import-row">
+                  <label class="dropzone" for="audioFile"><svg class="file-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 14v5h14v-5"/></svg><span class="drop-copy"><strong>选择音频文件</strong><small>WAV · MP3 · M4A · FLAC · 以及更多</small></span><span class="browse-label">浏览文件</span><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.flac,.ogg,.webm" /></label>
+                  <button id="importAudio" class="button button-outline import-button" type="button" disabled>导入到本机</button>
+                </div>
+                <div class="asset-status-row"><p id="assetStatus" class="asset-status" aria-live="polite">尚未选择音频</p><button id="retryUpload" class="button button-outline retry-upload" type="button" hidden>重试保存</button></div>
+              </section>
+
+              <section class="panel details-panel" aria-labelledby="detailsTitle">
+                <div class="panel-heading compact-heading">
+                  <div class="step-index muted-step">02</div><div><div class="panel-kicker">CONTEXT</div><h2 id="detailsTitle">为这段记录加一点上下文</h2></div>
+                </div>
+                <label class="input-group" for="recordTitle"><span class="input-label">记录名称</span><input id="recordTitle" class="text-input" placeholder="例如：产品访谈 · 周三下午" autocomplete="off" /><span class="input-help">之后可以随时修改</span></label>
+                <div class="settings-row">
+                  <label class="input-group profile-group" for="profile"><span class="input-label">整理方式</span><select id="profile" class="text-input"><option value="knowledge">知识学习</option><option value="decision">方案与决策</option><option value="interview">访谈与调研</option><option value="negotiation">商务谈判</option><option value="relationship">关系与日常对话</option><option value="evidence">记录与证据</option><option value="operations">会议与运营</option></select></label>
+                  <div class="profile-note"><span class="profile-note-icon" aria-hidden="true">✳</span><span>决定笔记如何归纳，不会更改或覆盖原始录音。</span></div>
+                </div>
+                <label class="input-group vault-group" for="vaultPath"><span class="input-label">保存到 Obsidian</span><span class="path-input-wrap"><input id="vaultPath" class="text-input" placeholder="选择你的 Vault 文件夹" autocomplete="off" /><button id="chooseVault" class="button button-outline" type="button">选择文件夹</button></span><span class="input-help">生成的笔记与证据索引将写入此处</span></label>
+                <div class="transcribe-row"><div><div class="input-label">准备好后再转写</div><p id="processStatus" class="process-status">先录音或导入音频</p></div><button id="transcribe" class="button button-primary" type="button" disabled><span>开始本地转写</span><span aria-hidden="true">→</span></button></div>
+              </section>
+
+              <section id="review" class="panel review-panel" aria-labelledby="reviewTitle">
+                <div class="panel-heading">
+                  <div class="step-index muted-step">03</div><div><div class="panel-kicker">REVIEW STUDIO</div><h2 id="reviewTitle">复核原文与证据</h2></div>
+                  <span class="panel-tag">每次修改都有记录</span>
+                </div>
+                <p class="review-intro">按记录 ID 打开已有转写，修正说话人或原文。模型建议始终可以回溯到对应音频片段。</p>
+                <div class="review-toolbar"><label for="reviewRecordId" class="sr-only">记录 ID</label><input id="reviewRecordId" class="text-input" placeholder="粘贴记录 ID" autocomplete="off" /><button id="loadReview" class="button button-outline" type="button">加载记录</button><button id="saveReview" class="button button-primary" type="button" disabled>保存修改</button></div>
+                <p id="reviewStatus" class="asset-status" aria-live="polite">未加载记录</p>
+                <audio id="reviewAudio" controls preload="metadata"></audio><div id="reviewSegments" class="review-segments"></div>
+              </section>
+            </div>
+
+            <aside class="secondary-column" aria-label="本机状态与设置">
+              <section class="status-panel">
+                <div class="status-topline"><span class="panel-kicker">LOCAL ENGINE</span><span class="status-orbit" aria-hidden="true"><i></i></span></div>
+                <h2>你的工作台，<br /><em>已准备就绪。</em></h2>
+                <p id="status" class="engine-status" aria-live="polite">正在连接本地处理节点…</p>
+                <button id="retry" class="text-button" type="button">重新检查 <span aria-hidden="true">↻</span></button>
+                <div class="status-divider"></div>
+                <div class="status-fact"><span>处理位置</span><strong><i class="privacy-dot"></i>仅此设备</strong></div>
+                <div class="status-fact"><span>当前整理方式</span><strong id="profileSummary">知识学习</strong></div>
+                <div class="status-fact"><span>输出目标</span><strong>Obsidian Vault</strong></div>
+              </section>
+
+              <section id="settings" class="settings-panel">
+                <div class="settings-heading"><span class="settings-symbol" aria-hidden="true">⌘</span><div><h3>本地工具设置</h3><p>只需设置一次</p></div></div>
+                <details class="setup-details"><summary><span class="setup-dot"></span>语音转写 · Whisper</summary>
+                  <div class="setup-body"><p>首次使用需选择本机安装的 whisper.cpp 与模型文件。</p>
+                    <label class="input-group" for="whisperPath"><span class="input-label">whisper-cli</span><span class="path-input-wrap"><input id="whisperPath" class="text-input" placeholder="选择 whisper-cli" autocomplete="off" /><button id="chooseWhisper" class="button button-outline small-button" type="button">浏览</button></span></label>
+                    <label class="input-group" for="modelPath"><span class="input-label">Whisper 模型</span><span class="path-input-wrap"><input id="modelPath" class="text-input" placeholder="选择 ggml 模型" autocomplete="off" /><button id="chooseModel" class="button button-outline small-button" type="button">浏览</button></span></label>
+                    <label class="input-group" for="ffmpegPath"><span class="input-label">FFmpeg（可选）</span><span class="path-input-wrap"><input id="ffmpegPath" class="text-input" placeholder="PATH 中的 ffmpeg 或文件路径" autocomplete="off" /><button id="chooseFfmpeg" class="button button-outline small-button" type="button">浏览</button></span></label>
+                    <p class="setup-footnote">转码仅在本机运行。目标格式的 WAV、MP3、FLAC、OGG 可直接处理。</p>
+                  </div>
+                </details>
+                <details class="setup-details semantic-details"><summary><span class="setup-dot"></span>语义整理 · Ollama</summary>
+                  <div class="setup-body"><p>可选。留空时仍可生成转写和证据索引。</p>
+                    <label class="input-group" for="ollamaEndpoint"><span class="input-label">本机服务地址</span><input id="ollamaEndpoint" class="text-input" placeholder="http://127.0.0.1:11434" autocomplete="off" /></label>
+                    <label class="input-group" for="ollamaModel"><span class="input-label">已安装的模型</span><input id="ollamaModel" class="text-input" placeholder="例如 qwen3:8b" autocomplete="off" /></label>
+                    <p class="setup-footnote">每条整理结果都必须引用原文，未经复核的内容会标为建议。</p>
+                  </div>
+                </details>
+              </section>
+
+              <div class="privacy-card"><span class="privacy-seal" aria-hidden="true">✳</span><div><strong>你的声音属于你</strong><p>录音、转写和模型请求仅在本机处理，不会因打开应用而上传。</p></div></div>
+              <footer class="sidebar-version">VOICE MEMORY <span>·</span> PRIVATE BY DESIGN</footer>
+            </aside>
+          </div>
+        </div>
+      </main>
     </div>
-    <div class="card"><strong>转写并生成可复核记录</strong>
-      <label class="field"><span>Obsidian Vault</span><input id="vaultPath" placeholder="选择 Vault 文件夹" /><button id="chooseVault">选择文件夹</button></label>
-      <label class="field"><span>记录标题</span><input id="recordTitle" placeholder="例如：客户访谈 2026-09-17" /><span></span></label>
-      <label class="field"><span>处理模式</span><select id="profile"><option value="knowledge">知识学习</option><option value="decision">方案与决策</option><option value="interview">访谈与调研</option><option value="negotiation">商务谈判</option><option value="relationship">关系与日常对话</option><option value="evidence">记录与证据</option><option value="operations">会议与运营</option></select><span></span></label>
-      <details><summary>本地 Whisper 设置</summary>
-        <label class="field"><span>whisper.cpp 程序</span><input id="whisperPath" placeholder="选择 whisper-cli / whisper-cli.exe" /><button id="chooseWhisper">选择程序</button></label>
-        <label class="field"><span>Whisper 模型</span><input id="modelPath" placeholder="选择 ggml 模型文件" /><button id="chooseModel">选择模型</button></label>
-        <label class="field"><span>FFmpeg 程序</span><input id="ffmpegPath" placeholder="ffmpeg（PATH）或选择 ffmpeg.exe" /><button id="chooseFfmpeg">选择程序</button></label>
-        <p>音频与转写只在本机处理。首次使用需选择 whisper.cpp 程序和模型。浏览器录音、WASAPI 系统录音及非 16 kHz/16-bit/单声道的 WAV 需要本机 FFmpeg 转码；符合目标格式的 WAV、MP3、FLAC、OGG 可直接处理。</p>
-      </details>
-      <details><summary>本地语义整理（可选，Ollama）</summary>
-        <label class="field"><span>Ollama 本机地址</span><input id="ollamaEndpoint" placeholder="http://127.0.0.1:11434" /><span></span></label>
-        <label class="field"><span>已安装的模型名称</span><input id="ollamaModel" placeholder="例如 qwen3:8b" /><span></span></label>
-        <p>留空则只生成转写与证据索引，不会伪造摘要。填写后由本机 Ollama 按所选模式整理；每条建议必须引用原文片段，并在笔记中标为“待审核”。语音、转写和模型请求都不会发送到云端。请先在本机安装 Ollama 并准备好模型。</p>
-      </details>
-      <button id="transcribe" disabled>开始本地转写</button><p id="processStatus">先录音或导入音频</p>
-    </div>
-    <div class="card"><strong>Review Studio（证据复核）</strong>
-      <p>输入记录 ID，修正转写或说话人标签。每次修改都会保留前后值并重新生成证据 Markdown。</p>
-      <div class="review-meta"><input id="reviewRecordId" placeholder="记录 ID" /><button id="loadReview">加载记录</button><button id="saveReview" disabled>保存修改</button><button id="reanalyze" disabled>用本机模型重新整理</button></div>
-      <p id="reviewStatus">未加载记录</p><audio id="reviewAudio" controls preload="metadata" style="width:100%;display:none"></audio><div id="reviewSegments"></div>
-    </div>
-    <div class="card"><strong>隐私边界</strong><p>桌面壳只访问本机 loopback API。录音、转写和声纹数据不会因为打开界面而上传。</p></div>
     <script type="module" src="/main.js"></script>
   </body>
 </html>

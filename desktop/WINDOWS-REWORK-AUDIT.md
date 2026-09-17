@@ -22,6 +22,6 @@
 - Original failures: Desktop runs `35174858931` (profile assertion) and `35175670265` (worker survived desktop exit).
 - Local checks: frontend bundle, Windows-target type check of the exact Rust modules, Python regression suite. These do not replace installed Windows validation.
 - Acceptance result must come from the workflow for the commit containing this audit; previous runs are not evidence for the new code.
-- Hosted Windows CI covers installation and process lifecycle. Physical audio devices, actual Whisper/Ollama inference, recording recovery, signing and updates remain separate acceptance requirements. Existing macOS installer is reused.
+- Hosted Windows CI covers installation and process lifecycle. Hosted Apple Silicon CI builds the current app and validates its local service lifecycle. Physical audio devices, actual Whisper/Ollama inference, recording recovery, signing and updates remain separate acceptance requirements.
 
 References: [Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects), [PyInstaller bootstrap process](https://pyinstaller.org/en/stable/advanced-topics.html#the-bootstrap-process-in-detail).

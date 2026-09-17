@@ -2,15 +2,22 @@ import { Command } from '@tauri-apps/plugin-shell';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import './styles.css';
 
 const status = document.querySelector('#status');
 const recordStatus = document.querySelector('#recordStatus');
 const assetStatus = document.querySelector('#assetStatus');
 const processStatus = document.querySelector('#processStatus');
 const assetImportButton = document.querySelector('#importAudio');
+const audioFileInput = document.querySelector('#audioFile');
 const transcribeButton = document.querySelector('#transcribe');
 const systemAudioButton = document.querySelector('#systemAudioRecord');
 const systemAudioStatus = document.querySelector('#systemAudioStatus');
+const systemAudioLabel = systemAudioButton.querySelector('span:not(.windows-only)');
+const recordLabel = document.querySelector('.record-label');
+const retryUploadButton = document.querySelector('#retryUpload');
+const profileSelect = document.querySelector('#profile');
+const profileSummary = document.querySelector('#profileSummary');
 let nodeProcess;
 let nodeStartPromise;
 let appIsClosing = false;
@@ -18,6 +25,7 @@ let closeCleanupStarted = false;
 const apiUrl = 'http://127.0.0.1:8765';
 let currentAsset;
 let lastCompletedJob;
+let pendingUpload;
 
 for (const id of ['vaultPath', 'whisperPath', 'modelPath', 'ffmpegPath', 'ollamaModel']) {
   document.querySelector(`#${id}`).value = localStorage.getItem(`voice-memory.${id}`) || '';
@@ -26,6 +34,10 @@ for (const id of ['vaultPath', 'whisperPath', 'modelPath', 'ffmpegPath', 'ollama
 const ollamaEndpoint = document.querySelector('#ollamaEndpoint');
 ollamaEndpoint.value = localStorage.getItem('voice-memory.ollamaEndpoint') || 'http://127.0.0.1:11434';
 ollamaEndpoint.addEventListener('change', () => localStorage.setItem('voice-memory.ollamaEndpoint', ollamaEndpoint.value));
+profileSelect.addEventListener('change', () => {
+  profileSummary.textContent = profileSelect.selectedOptions[0]?.textContent || '自定义';
+});
+document.querySelector('#todayDate').textContent = new Intl.DateTimeFormat('zh-CN', {dateStyle:'medium'}).format(new Date()).toUpperCase();
 
 function refreshActions() {
   const ready = Boolean(currentAsset && document.querySelector('#vaultPath').value.trim() && document.querySelector('#whisperPath').value.trim() && document.querySelector('#modelPath').value.trim());
@@ -63,11 +75,16 @@ choosePath('chooseFfmpeg', 'ffmpegPath', {directory:false, multiple:false, title
 
 async function uploadAudio(blob, name, source = 'loopback-upload') {
   assetStatus.textContent = '正在写入本地音频账本…';
-  const response = await fetch(`${apiUrl}/ledger/upload`, {
-    method:'POST',
-    headers:{'Content-Type':'application/octet-stream', 'X-File-Name':encodeURIComponent(name), 'X-Audio-Source':source},
-    body:blob,
-  });
+  let response;
+  try {
+    response = await fetch(`${apiUrl}/ledger/upload`, {
+      method:'POST',
+      headers:{'Content-Type':'application/octet-stream', 'X-File-Name':encodeURIComponent(name), 'X-Audio-Source':source},
+      body:blob,
+    });
+  } catch (error) {
+    throw new Error(`无法连接本机音频服务（${error.message}）。音频暂存在本次会话中，恢复服务后可重试保存。`);
+  }
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
   if (currentAsset?.id !== result.id) lastCompletedJob = null;
@@ -77,23 +94,78 @@ async function uploadAudio(blob, name, source = 'loopback-upload') {
   return result;
 }
 
-document.querySelector('#audioFile').addEventListener('change', (event) => {
+async function saveAudio(blob, name, source) {
+  pendingUpload = {blob, name, source};
+  retryUploadButton.hidden = false;
+  try {
+    const asset = await uploadAudio(blob, name, source);
+    pendingUpload = null;
+    retryUploadButton.hidden = true;
+    return asset;
+  } catch (error) {
+    assetStatus.textContent = error.message;
+    throw error;
+  }
+}
+
+retryUploadButton.addEventListener('click', async () => {
+  if (!pendingUpload) return;
+  retryUploadButton.disabled = true;
+  retryUploadButton.textContent = '正在重试…';
+  const pending = pendingUpload;
+  try {
+    await saveAudio(pending.blob, pending.name, pending.source);
+    if (pending.source === 'microphone-capture') recordStatus.textContent = '录音已写入本地音频账本';
+  } catch {}
+  finally {
+    retryUploadButton.disabled = false;
+    retryUploadButton.textContent = '重试保存';
+  }
+});
+
+function selectAudioFile(event) {
   assetImportButton.disabled = !event.target.files?.length;
   currentAsset = null;
   lastCompletedJob = null;
   assetStatus.textContent = event.target.files?.length ? '已选择文件，点击“导入账本”' : '尚未选择音频';
   refreshActions();
   const file = event.target.files?.[0];
+  const fileName = document.querySelector('.drop-copy strong');
+  const fileHint = document.querySelector('.drop-copy small');
+  fileName.textContent = file?.name || '选择音频文件';
+  fileHint.textContent = file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · 准备写入本机` : 'WAV · MP3 · M4A · FLAC · 以及更多';
   if (file && !document.querySelector('#recordTitle').value) {
     document.querySelector('#recordTitle').value = file.name.replace(/\.[^.]+$/, '');
   }
+}
+
+audioFileInput.addEventListener('change', selectAudioFile);
+const dropzone = document.querySelector('.dropzone');
+for (const name of ['dragenter', 'dragover']) dropzone.addEventListener(name, (event) => {
+  event.preventDefault();
+  dropzone.classList.add('dragging');
+});
+for (const name of ['dragleave', 'drop']) dropzone.addEventListener(name, (event) => {
+  event.preventDefault();
+  dropzone.classList.remove('dragging');
+});
+dropzone.addEventListener('drop', (event) => {
+  const file = [...(event.dataTransfer?.files || [])].find(item => item.type.startsWith('audio/') || /\.(m4a|mp3|wav|flac|ogg|webm)$/i.test(item.name));
+  if (!file) {
+    assetStatus.textContent = '请拖入受支持的音频文件';
+    return;
+  }
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  audioFileInput.files = transfer.files;
+  audioFileInput.dispatchEvent(new Event('change', {bubbles:true}));
 });
 
 assetImportButton.addEventListener('click', async () => {
-  const file = document.querySelector('#audioFile').files?.[0];
+  const file = audioFileInput.files?.[0];
   if (!file) return;
   assetImportButton.disabled = true;
-  try { await uploadAudio(file, file.name, 'file-import'); processStatus.textContent = '音频已导入，配置转写后即可生成记录'; }
+  try { await saveAudio(file, file.name, 'file-import'); processStatus.textContent = '音频已导入，配置转写后即可生成记录'; }
   catch (error) { assetStatus.textContent = `导入失败：${error.message}`; }
   finally { assetImportButton.disabled = false; }
 });
@@ -199,12 +271,12 @@ systemAudioButton.addEventListener('click', async () => {
     if (!systemAudioRecording) {
       const recoveryPath = await invoke('start_system_audio_capture');
       systemAudioRecording = true;
-      systemAudioButton.textContent = '停止并保存系统音频';
+      systemAudioLabel.textContent = '停止并保存';
       systemAudioStatus.textContent = `正在本机捕获系统播放声音；麦克风录音可同时进行。临时录音文件：${recoveryPath}`;
       return;
     }
     systemAudioRecording = false;
-    systemAudioButton.textContent = '开始 Windows 系统音频录音';
+    systemAudioLabel.textContent = '录制系统声音';
     const asset = await invoke('stop_system_audio_capture');
     if (currentAsset?.id !== asset.id) lastCompletedJob = null;
     currentAsset = asset;
@@ -214,7 +286,7 @@ systemAudioButton.addEventListener('click', async () => {
     if (!document.querySelector('#recordTitle').value) document.querySelector('#recordTitle').value = `系统录音 ${localTimestamp()}`;
   } catch (error) {
     if (systemAudioRecording) systemAudioRecording = false;
-    systemAudioButton.textContent = '开始 Windows 系统音频录音';
+    systemAudioLabel.textContent = '录制系统声音';
     systemAudioStatus.textContent = `系统音频录制失败：${error.message || error}`;
   } finally {
     systemAudioButton.disabled = false;
@@ -223,7 +295,7 @@ systemAudioButton.addEventListener('click', async () => {
 
 document.querySelector('#record').addEventListener('click', async (event) => {
   const button = event.currentTarget;
-  if (recorder?.state === 'recording') { recorder.stop(); button.textContent = '开始录音'; return; }
+  if (recorder?.state === 'recording') { recorder.stop(); recordLabel.textContent = '开始麦克风录音'; return; }
   try {
       const stream = await navigator.mediaDevices.getUserMedia({audio: true});
     recorder = new MediaRecorder(stream); chunks = [];
@@ -234,12 +306,12 @@ document.querySelector('#record').addEventListener('click', async (event) => {
       try {
         const mimeSubtype = (recorder.mimeType || blob.type || 'audio/webm').split('/')[1]?.split(';')[0]?.toLowerCase() || 'webm';
         const extension = ({'mp4':'m4a', 'x-wav':'wav'})[mimeSubtype] || mimeSubtype;
-        await uploadAudio(blob, `microphone-${Date.now()}.${extension}`, 'microphone-capture');
+        await saveAudio(blob, `microphone-${Date.now()}.${extension}`, 'microphone-capture');
         recordStatus.textContent = '录音已写入本地音频账本';
         if (!document.querySelector('#recordTitle').value) document.querySelector('#recordTitle').value = `录音 ${localTimestamp()}`;
       } catch (error) { recordStatus.textContent = `写入失败：${error.message}`; }
     };
-    recorder.start(); button.textContent = '停止并保存'; recordStatus.textContent = '录音中（仅麦克风）';
+    recorder.start(); recordLabel.textContent = '停止并保存录音'; recordStatus.textContent = '录音中（仅麦克风）';
   } catch (error) { recordStatus.textContent = `无法访问麦克风：${error.message}`; }
 });
 

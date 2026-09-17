@@ -37,6 +37,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
     ledger: AudioLedger
     jobs: JobStore
     allowed_origins = {"http://tauri.localhost", "tauri://localhost", "http://127.0.0.1:8765", "http://localhost:8765"}
+    allowed_headers = ("Content-Type", "X-File-Name", "X-Audio-Source")
     _index_lock = threading.Lock()
 
     def _record_sidecar(self, record_id: str) -> Path:
@@ -81,7 +82,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-File-Name")
+            self.send_header("Access-Control-Allow-Headers", ", ".join(self.allowed_headers))
             self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -95,7 +96,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-File-Name")
+            self.send_header("Access-Control-Allow-Headers", ", ".join(self.allowed_headers))
             self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.end_headers()
 
