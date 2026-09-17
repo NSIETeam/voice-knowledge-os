@@ -42,11 +42,19 @@ jobs:
           python -m pip install --disable-pip-version-check pyinstaller
           pyinstaller --onefile --name voice-memory-node --paths ../src sidecar_entry.py
           mkdir -p src-tauri/binaries
-          cp dist/voice-memory-node src-tauri/binaries/voice-memory-node-${{ matrix.target }}
+          source="dist/voice-memory-node"
+          suffix=""
+          if [[ -f "${source}.exe" ]]; then source="${source}.exe"; suffix=".exe"; fi
+          if [[ ! -f "$source" ]]; then echo "PyInstaller sidecar not found: $source"; exit 1; fi
+          binary="src-tauri/binaries/voice-memory-node-${{ matrix.target }}${suffix}"
+          cp "$source" "$binary"
       - name: Smoke test bundled local processing node
         working-directory: desktop
         shell: bash
-        run: ./src-tauri/binaries/voice-memory-node-${{ matrix.target }} --help
+        run: |
+          binary="src-tauri/binaries/voice-memory-node-${{ matrix.target }}"
+          if [[ -f "${binary}.exe" ]]; then binary="${binary}.exe"; fi
+          "$binary" --help
       - name: Generate deterministic application icon
         working-directory: desktop
         run: python scripts/generate_icon.py
