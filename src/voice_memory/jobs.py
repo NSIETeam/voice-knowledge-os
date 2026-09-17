@@ -25,18 +25,21 @@ class JobStore:
     def __init__(self, root: str | Path):
         self.root = Path(root) / "jobs"
         self.root.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
 
     def _path(self, job_id: str) -> Path:
         return self.root / f"{job_id}.json"
 
     def get(self, job_id: str) -> ProcessingJob:
-        return ProcessingJob(**json.loads(self._path(job_id).read_text(encoding="utf-8")))
+        with self._lock:
+            return ProcessingJob(**json.loads(self._path(job_id).read_text(encoding="utf-8")))
 
     def _save(self, job: ProcessingJob) -> None:
         path = self._path(job.id)
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(asdict(job), ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(path)
+        with self._lock:
+            temporary.write_text(json.dumps(asdict(job), ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.replace(path)
 
     def submit(self, source_path: str | Path, provider: TranscriptionProvider) -> ProcessingJob:
         job = ProcessingJob(
