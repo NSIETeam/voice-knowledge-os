@@ -80,6 +80,24 @@ def stop_tree(app: subprocess.Popen[bytes]) -> None:
         app.wait(timeout=10)
 
 
+def capture_startup_state(diagnostics: Path, app: subprocess.Popen[bytes]) -> dict:
+    rows = processes()
+    state = {
+        "app_pid": app.pid,
+        "app_returncode": app.poll(),
+        "health": health(),
+        "listeners": listener_pids(),
+        "processes": [
+            row for row in rows
+            if int(row["pid"]) == app.pid
+            or "voice-memory-desktop" in str(row["command"])
+            or "voice-memory-node" in str(row["command"])
+        ],
+    }
+    (diagnostics / "startup-state.json").write_text(json.dumps(state, indent=2))
+    return state
+
+
 def main() -> int:
     diagnostics = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / f"voice-memory-{TARGET}-smoke"
     home = diagnostics / "home"
@@ -131,7 +149,8 @@ def main() -> int:
                 break
             time.sleep(0.2)
         if not payload or payload != {"status": "ok", "service": "voice-memory"}:
-            raise RuntimeError("packaged app failed to start its local API")
+            state = capture_startup_state(diagnostics, app)
+            raise RuntimeError(f"packaged app failed to start its local API; startup state: {state}")
         assert_owned_listener(app)
         with urllib.request.urlopen(f"{API}/profiles", timeout=5) as response:
             profiles = json.load(response)

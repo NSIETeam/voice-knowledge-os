@@ -12,6 +12,7 @@ on:
 jobs:
   build-shell:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-14
