@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from urllib.parse import unquote
 import base64
+import errno
 import mimetypes
 import os
 import re
@@ -386,6 +387,10 @@ def _process_exists(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError as error:
+        if error.errno == errno.ESRCH or getattr(error, "winerror", None) in {6, 87}:
+            return False
+        raise
     return True
 
 
