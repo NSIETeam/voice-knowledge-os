@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import shutil
-from dataclasses import replace
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from difflib import unified_diff
 
 from .models import ConversationRecord, PROFILES
 
@@ -16,6 +19,61 @@ def _managed(section_id: str, body: str, version: int = 1) -> str:
         f"{body.rstrip()}\n"
         f"<!-- voice-memory:managed:end -->"
     )
+
+
+_MANAGED_BLOCK = re.compile(
+    r"<!-- voice-memory:managed:start id=([A-Za-z0-9_-]+) version=(\d+) -->\r?\n"
+    r"(.*?)\r?\n<!-- voice-memory:managed:end -->",
+    re.DOTALL,
+)
+
+
+def _managed_blocks(markdown: str) -> dict[str, tuple[str, str]]:
+    blocks: dict[str, tuple[str, str]] = {}
+    for match in _MANAGED_BLOCK.finditer(markdown):
+        block_id = match.group(1)
+        if block_id in blocks:
+            raise ValueError(f"duplicate managed block: {block_id}")
+        blocks[block_id] = (match.group(0), match.group(3))
+    starts = markdown.count("<!-- voice-memory:managed:start")
+    if starts != len(blocks) or markdown.count("<!-- voice-memory:managed:end -->") != len(blocks):
+        raise ValueError("malformed managed block boundary; refusing to overwrite the note")
+    return blocks
+
+
+def _merge_managed(existing: str, generated: str) -> str:
+    old_blocks = _managed_blocks(existing)
+    new_blocks = _managed_blocks(generated)
+    if not old_blocks:
+        raise ValueError("existing note has no Voice Memory managed blocks; refusing to overwrite user content")
+    newline = "\r\n" if existing.count("\r\n") > existing.count("\n") / 2 else "\n"
+    replacements = {
+        block_id: value[0].replace("\n", newline)
+        for block_id, value in new_blocks.items()
+    }
+    merged = _MANAGED_BLOCK.sub(
+        lambda match: replacements.get(match.group(1), match.group(0)),
+        existing,
+    )
+    return merged
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary_name = stream.name
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        if temporary_name and os.path.exists(temporary_name):
+            os.unlink(temporary_name)
 
 
 def write_source_transcript_snapshot(record: ConversationRecord, vault: str | Path) -> Path:
@@ -110,10 +168,10 @@ def compile_record(record: ConversationRecord) -> str:
         f"# {record.title}",
         _managed("summary", summary),
         _managed("actions", actions),
-        "## 关联对象\n\n" + links,
-        "## 证据索引\n\n" + evidence,
-        "## 原始转写\n\n" + transcript,
-        "## 处理记录\n\n- 首次编译：" + datetime.now(timezone.utc).isoformat(),
+        _managed("associations", "## 关联对象\n\n" + links),
+        _managed("evidence", "## 证据索引\n\n" + evidence),
+        _managed("transcript", "## 原始转写\n\n" + transcript),
+        _managed("processing", "## 处理记录\n\n- 首次编译：" + datetime.now(timezone.utc).isoformat()),
         "",
     ])
 
@@ -130,13 +188,26 @@ def write_compiled(
     sidecar_dir = machine_root / "recordings"
     rollback_dir = machine_root / "rollback" / record.id
     sidecar_dir.mkdir(parents=True, exist_ok=True)
+    existing_markdown: str | None = None
     if destination.exists():
+        with destination.open("r", encoding="utf-8", newline="") as stream:
+            existing_markdown = stream.read()
         rollback_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         shutil.copyfile(destination, rollback_dir / f"{stamp}.md")
 
     rendered = compile_record(record)
-    destination.write_text(rendered, encoding="utf-8")
+    final_markdown = _merge_managed(existing_markdown, rendered) if existing_markdown is not None else rendered
+    if existing_markdown is not None:
+        diff_dir = machine_root / "diffs" / record.id
+        diff = "".join(unified_diff(
+            existing_markdown.splitlines(keepends=True),
+            final_markdown.splitlines(keepends=True),
+            fromfile=f"{destination.name} (before)",
+            tofile=f"{destination.name} (after)",
+        ))
+        _atomic_write(diff_dir / f"{stamp}.diff", diff)
+    _atomic_write(destination, final_markdown)
     audio = Path(record.audio_path).expanduser()
     source_sha256 = None
     if audio.is_file():
@@ -168,8 +239,8 @@ def write_compiled(
         "record": record.to_dict(),
         "correction_history": correction_history,
     }
-    (sidecar_dir / f"{record.id}.json").write_text(
+    _atomic_write(
+        sidecar_dir / f"{record.id}.json",
         json.dumps(sidecar, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
     )
     return destination

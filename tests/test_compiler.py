@@ -1,3 +1,5 @@
+import pytest
+
 from voice_memory.cli import demo_record
 from voice_memory.compiler import compile_record, write_compiled
 
@@ -48,3 +50,71 @@ def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):
     write_compiled(record, vault)
     backups = list((vault / ".voice-memory" / "rollback" / record.id).glob("*.md"))
     assert len(backups) == 1
+
+
+def test_recompile_updates_only_managed_blocks_and_records_diff(tmp_path):
+    record = demo_record()
+    vault = tmp_path / "vault"
+    note = write_compiled(record, vault)
+    before = note.read_text(encoding="utf-8")
+    personal = "\n\n## 我的补充\n\n这段由用户撰写，必须逐字保留。\n\n"
+    action_marker = "<!-- voice-memory:managed:start id=actions"
+    note.write_text(before.replace(action_marker, personal + action_marker), encoding="utf-8")
+
+    record.segments[0].text = "人工修订后的原文"
+    write_compiled(record, vault)
+
+    after = note.read_text(encoding="utf-8")
+    assert personal in after
+    assert "人工修订后的原文" in after
+    assert "第一阶段先做桌面端本地处理" not in after
+    backups = list((vault / ".voice-memory" / "rollback" / record.id).glob("*.md"))
+    diffs = list((vault / ".voice-memory" / "diffs" / record.id).glob("*.diff"))
+    assert len(backups) == 1
+    assert len(diffs) == 1
+    assert "人工修订后的原文" in diffs[0].read_text(encoding="utf-8")
+
+
+def test_recompile_refuses_to_replace_note_without_managed_blocks(tmp_path):
+    record = demo_record()
+    vault = tmp_path / "vault"
+    note = vault / "Recordings" / f"{record.title}.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("# My existing note\n\nUser-authored content.\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="refusing to overwrite user content"):
+        write_compiled(record, vault)
+    assert note.read_text(encoding="utf-8") == "# My existing note\n\nUser-authored content.\n"
+
+
+def test_managed_boundaries_are_validated_before_replacement(tmp_path):
+    record = demo_record()
+    vault = tmp_path / "vault"
+    note = write_compiled(record, vault)
+    content = note.read_text(encoding="utf-8").replace("<!-- voice-memory:managed:end -->", "", 1)
+    note.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="malformed managed block boundary"):
+        write_compiled(record, vault)
+    assert note.read_text(encoding="utf-8") == content
+
+
+def test_recompile_preserves_windows_line_endings_outside_managed_blocks(tmp_path):
+    record = demo_record()
+    vault = tmp_path / "vault"
+    note = write_compiled(record, vault)
+    original = note.read_text(encoding="utf-8").replace("\n", "\r\n")
+    user_text = "## Windows 用户补充\r\n\r\n保留 CRLF 与原文。\r\n\r\n"
+    note.write_bytes(original.replace(
+        "<!-- voice-memory:managed:start id=actions",
+        user_text + "<!-- voice-memory:managed:start id=actions",
+    ).encode("utf-8"))
+
+    record.segments[0].text = "修订内容"
+    write_compiled(record, vault)
+
+    with note.open("r", encoding="utf-8", newline="") as stream:
+        updated = stream.read()
+    assert user_text in updated
+    assert "<!-- voice-memory:managed:start id=transcript version=1 -->\r\n" in updated
+    assert "修订内容" in updated
