@@ -8,6 +8,7 @@
     {
       "identifier": "shell:allow-spawn",
       "allow": [{"name": "binaries/voice-memory-node", "sidecar": true, "args": true}]
-    }
+    },
+    "dialog:allow-open"
   ]
 }

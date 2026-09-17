@@ -1,9 +1,89 @@
 import { Command } from '@tauri-apps/plugin-shell';
+import { open } from '@tauri-apps/plugin-dialog';
 
 const status = document.querySelector('#status');
 const recordStatus = document.querySelector('#recordStatus');
+const assetStatus = document.querySelector('#assetStatus');
+const processStatus = document.querySelector('#processStatus');
+const assetImportButton = document.querySelector('#importAudio');
+const transcribeButton = document.querySelector('#transcribe');
 let nodeProcess;
 const apiUrl = 'http://127.0.0.1:8765';
+let currentAsset;
+
+for (const id of ['vaultPath', 'whisperPath', 'modelPath', 'ffmpegPath']) {
+  document.querySelector(`#${id}`).value = localStorage.getItem(`voice-memory.${id}`) || '';
+  document.querySelector(`#${id}`).addEventListener('change', (event) => localStorage.setItem(`voice-memory.${id}`, event.target.value));
+}
+
+function refreshActions() {
+  const ready = Boolean(currentAsset && document.querySelector('#vaultPath').value.trim() && document.querySelector('#whisperPath').value.trim() && document.querySelector('#modelPath').value.trim());
+  transcribeButton.disabled = !ready;
+}
+
+function localTimestamp() {
+  const date = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+}
+
+for (const id of ['vaultPath', 'whisperPath', 'modelPath', 'ffmpegPath']) document.querySelector(`#${id}`).addEventListener('input', refreshActions);
+
+async function choosePath(buttonId, inputId, options) {
+  document.querySelector(`#${buttonId}`).addEventListener('click', async () => {
+    try {
+      const result = await open(options);
+      if (result && typeof result === 'string') {
+        const input = document.querySelector(`#${inputId}`);
+        input.value = result;
+        input.dispatchEvent(new Event('change'));
+        input.dispatchEvent(new Event('input'));
+      }
+    } catch (error) {
+      processStatus.textContent = `无法打开系统文件选择器：${error.message}`;
+    }
+  });
+}
+
+choosePath('chooseVault', 'vaultPath', {directory:true, multiple:false, title:'选择 Obsidian Vault'});
+choosePath('chooseWhisper', 'whisperPath', {directory:false, multiple:false, title:'选择 whisper.cpp 程序', filters:[{name:'程序', extensions:['exe','app','bin','command']}]});
+choosePath('chooseModel', 'modelPath', {directory:false, multiple:false, title:'选择 Whisper 模型', filters:[{name:'Whisper 模型', extensions:['bin','gguf']}]});
+choosePath('chooseFfmpeg', 'ffmpegPath', {directory:false, multiple:false, title:'选择 FFmpeg 程序', filters:[{name:'FFmpeg', extensions:['exe','bin','command']}]});
+
+async function uploadAudio(blob, name) {
+  assetStatus.textContent = '正在写入本地音频账本…';
+  const response = await fetch(`${apiUrl}/ledger/upload`, {
+    method:'POST',
+    headers:{'Content-Type':'application/octet-stream', 'X-File-Name':encodeURIComponent(name)},
+    body:blob,
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  currentAsset = result;
+  assetStatus.textContent = `已保存：${result.original_name} · ${result.size_bytes} bytes · SHA-256 ${result.sha256.slice(0, 12)}…`;
+  refreshActions();
+  return result;
+}
+
+document.querySelector('#audioFile').addEventListener('change', (event) => {
+  assetImportButton.disabled = !event.target.files?.length;
+  currentAsset = null;
+  assetStatus.textContent = event.target.files?.length ? '已选择文件，点击“导入账本”' : '尚未选择音频';
+  refreshActions();
+  const file = event.target.files?.[0];
+  if (file && !document.querySelector('#recordTitle').value) {
+    document.querySelector('#recordTitle').value = file.name.replace(/\.[^.]+$/, '');
+  }
+});
+
+assetImportButton.addEventListener('click', async () => {
+  const file = document.querySelector('#audioFile').files?.[0];
+  if (!file) return;
+  assetImportButton.disabled = true;
+  try { await uploadAudio(file, file.name); processStatus.textContent = '音频已导入，配置转写后即可生成记录'; }
+  catch (error) { assetStatus.textContent = `导入失败：${error.message}`; }
+  finally { assetImportButton.disabled = false; }
+});
 
 async function startNode() {
   try {
@@ -52,16 +132,19 @@ document.querySelector('#record').addEventListener('click', async (event) => {
   const button = event.currentTarget;
   if (recorder?.state === 'recording') { recorder.stop(); button.textContent = '开始录音'; return; }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+      const stream = await navigator.mediaDevices.getUserMedia({audio: true});
     recorder = new MediaRecorder(stream); chunks = [];
     recorder.ondataavailable = (e) => chunks.push(e.data);
     recorder.onstop = async () => {
       stream.getTracks().forEach(track => track.stop());
       const blob = new Blob(chunks, {type: recorder.mimeType || 'audio/webm'});
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      let binary = ''; bytes.forEach(byte => binary += String.fromCharCode(byte));
-      const response = await fetch(`${apiUrl}/ledger/upload`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name:'microphone.webm', data_base64:btoa(binary)})});
-      recordStatus.textContent = response.ok ? '录音已写入本地音频账本' : '写入失败，请检查本地节点';
+      try {
+        const mimeSubtype = (recorder.mimeType || blob.type || 'audio/webm').split('/')[1]?.split(';')[0]?.toLowerCase() || 'webm';
+        const extension = ({'mp4':'m4a', 'x-wav':'wav'})[mimeSubtype] || mimeSubtype;
+        await uploadAudio(blob, `microphone-${Date.now()}.${extension}`);
+        recordStatus.textContent = '录音已写入本地音频账本';
+        if (!document.querySelector('#recordTitle').value) document.querySelector('#recordTitle').value = `录音 ${localTimestamp()}`;
+      } catch (error) { recordStatus.textContent = `写入失败：${error.message}`; }
     };
     recorder.start(); button.textContent = '停止并保存'; recordStatus.textContent = '录音中（仅麦克风）';
   } catch (error) { recordStatus.textContent = `无法访问麦克风：${error.message}`; }
@@ -144,6 +227,43 @@ document.querySelector('#loadReview').addEventListener('click', async () => {
     renderReview(reviewRecord);
     reviewStatus.textContent = `已加载 ${reviewRecord.title}，历史修正 ${sidecar.correction_history?.length || 0} 次`;
   } catch (error) { reviewStatus.textContent = `加载失败：${error.message}`; reviewSegments.replaceChildren(); saveReview.disabled = true; }
+});
+
+transcribeButton.addEventListener('click', async () => {
+  if (!currentAsset) return;
+  const title = document.querySelector('#recordTitle').value.trim();
+  if (!title) { processStatus.textContent = '请填写记录标题'; return; }
+  transcribeButton.disabled = true;
+  try {
+    processStatus.textContent = '已加入本地转写队列…';
+    const response = await fetch(`${apiUrl}/transcribe`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({asset_id:currentAsset.id, provider:'whisper.cpp', executable:document.querySelector('#whisperPath').value.trim(), model:document.querySelector('#modelPath').value.trim(), ffmpeg_executable:document.querySelector('#ffmpegPath').value.trim() || 'ffmpeg'}),
+    });
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || `HTTP ${response.status}`);
+    let current;
+    do {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const poll = await fetch(`${apiUrl}/jobs/${encodeURIComponent(job.id)}`);
+      current = await poll.json();
+      if (!poll.ok) throw new Error(current.error || `HTTP ${poll.status}`);
+      processStatus.textContent = current.status === 'running' ? '正在本机转写，请稍候…' : '转写任务已排队…';
+    } while (current.status === 'queued' || current.status === 'running');
+    if (current.status !== 'completed') throw new Error(current.error || '本地转写失败');
+    processStatus.textContent = '转写完成，正在生成证据记录…';
+    const compile = await fetch(`${apiUrl}/records/from-job`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({job_id:job.id, asset_id:currentAsset.id, title, primary_mode:document.querySelector('#profile').value, vault:document.querySelector('#vaultPath').value.trim()}),
+    });
+    const result = await compile.json();
+    if (!compile.ok) throw new Error(result.error || `HTTP ${compile.status}`);
+    document.querySelector('#reviewRecordId').value = result.record_id;
+    await document.querySelector('#loadReview').click();
+    processStatus.textContent = `完成：已写入 Vault · ${result.path}`;
+  } catch (error) {
+    processStatus.textContent = `处理失败：${error.message}`;
+  } finally { refreshActions(); }
 });
 
 saveReview.addEventListener('click', async () => {

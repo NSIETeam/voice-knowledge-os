@@ -22,7 +22,7 @@
       "resizable": true
     }],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8765; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8765; media-src 'self' http://127.0.0.1:8765; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {

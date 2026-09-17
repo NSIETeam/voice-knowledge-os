@@ -2,9 +2,16 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.pyc
+*.egg-info/
+uv.lock
 .voice-memory/
 dist/
 desktop/dist/
 desktop/build/
 desktop/node_modules/
+desktop/voice-memory-node.spec
 desktop/src-tauri/binaries/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/
+desktop/src-tauri/icons/icon.png
+desktop/src-tauri/icons/icon.ico

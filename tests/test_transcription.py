@@ -49,10 +49,39 @@ def test_whisper_outputs_are_kept_out_of_immutable_audio_directory(tmp_path, mon
         )
 
     monkeypatch.setattr("voice_memory.transcription.subprocess.run", fake_run)
-    result = WhisperCppProvider("whisper-cli", "model.bin").transcribe(audio)
+    result = WhisperCppProvider("whisper-cli", "model.bin", source_name="content.wav").transcribe(audio)
 
     assert result.segments[0].text == "local text"
     assert output_paths[0].parent != objects
     assert not output_paths[0].parent.exists()
     assert audio.read_bytes() == original
     assert list(objects.iterdir()) == [audio]
+
+
+def test_web_audio_is_normalized_with_ffmpeg_in_temporary_workspace(tmp_path, monkeypatch):
+    from voice_memory.transcription import WhisperCppProvider
+
+    objects = tmp_path / "objects"
+    objects.mkdir()
+    audio = objects / "content-addressed-object"
+    original = b"webm source bytes"
+    audio.write_bytes(original)
+    commands = []
+    working_directories = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        if command[0] == "ffmpeg":
+            working_directories.append(Path(command[-1]).parent)
+            Path(command[-1]).write_bytes(b"normalized wav")
+        else:
+            output_base = Path(command[command.index("-of") + 1])
+            output_base.with_suffix(".json").write_text(json.dumps({"transcription": []}), encoding="utf-8")
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", fake_run)
+    WhisperCppProvider("whisper-cli", "model.bin", source_name="recording.webm").transcribe(audio)
+
+    assert commands[0][:8] == ["ffmpeg", "-nostdin", "-y", "-i", commands[0][4], "-vn", "-ac", "1"]
+    assert commands[1][commands[1].index("-f") + 1].endswith("normalized.wav")
+    assert not working_directories[0].exists()
+    assert audio.read_bytes() == original

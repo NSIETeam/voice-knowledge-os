@@ -99,6 +99,48 @@ class AudioLedger:
         record_path.write_text(json.dumps(asdict(asset), ensure_ascii=False, indent=2), encoding="utf-8")
         return asset
 
+    def import_stream(self, stream, content_length: int, original_name: str, sensitivity: str = "private") -> AudioAsset:
+        """Stream a loopback upload to disk without buffering the recording in memory."""
+        if content_length <= 0:
+            raise ValueError("audio upload is empty")
+        if content_length > 8 * 1024 * 1024 * 1024:
+            raise ValueError("audio upload exceeds the 8 GiB limit")
+        temporary = self.objects / f".upload-{uuid.uuid4().hex}.part"
+        digest = hashlib.sha256()
+        remaining = content_length
+        try:
+            with temporary.open("xb") as destination:
+                while remaining:
+                    chunk = stream.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise ValueError("audio upload ended before Content-Length bytes were received")
+                    destination.write(chunk)
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+            sha256 = digest.hexdigest()
+            object_path = self.objects / sha256
+            if object_path.exists():
+                temporary.unlink()
+            else:
+                temporary.replace(object_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        asset = AudioAsset(
+            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"voice-memory:{sha256}")),
+            sha256=sha256,
+            original_name=original_name,
+            source_path="loopback-upload",
+            stored_path=str(object_path),
+            size_bytes=content_length,
+            imported_at=datetime.now(timezone.utc).isoformat(),
+            sensitivity=sensitivity,
+        )
+        record_path = self.records / f"{asset.id}.json"
+        if record_path.exists():
+            return AudioAsset(**json.loads(record_path.read_text(encoding="utf-8")))
+        record_path.write_text(json.dumps(asdict(asset), ensure_ascii=False, indent=2), encoding="utf-8")
+        return asset
+
     def get(self, asset_id: str) -> AudioAsset:
         path = self.records / f"{asset_id}.json"
         if not path.is_file():

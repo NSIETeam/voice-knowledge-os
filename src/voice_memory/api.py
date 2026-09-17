@@ -4,6 +4,10 @@ import json
 from urllib.parse import unquote
 import base64
 import mimetypes
+import re
+import threading
+import uuid
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,7 +18,7 @@ from .compiler import write_compiled
 from .jobs import JobStore
 from .models import ConversationRecord, PROFILES, Segment
 from .transcription import FixtureProvider, WhisperCppProvider
-from .review import apply_correction, load_sidecar
+from .review import apply_correction
 
 
 INDEX_HTML = """<!doctype html>
@@ -31,6 +35,27 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
     ledger: AudioLedger
     jobs: JobStore
     allowed_origins = {"http://tauri.localhost", "tauri://localhost", "http://127.0.0.1:8765", "http://localhost:8765"}
+    _index_lock = threading.Lock()
+
+    def _record_sidecar(self, record_id: str) -> Path:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", record_id):
+            raise FileNotFoundError(record_id)
+        index_path = self.data_root / "record-index.json"
+        index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+        path = Path(index.get(record_id, "")).resolve()
+        if path.name != f"{record_id}.json" or path.parent.name != "recordings" or path.parent.parent.name != ".voice-memory" or not path.is_file():
+            raise FileNotFoundError(record_id)
+        return path
+
+    def _register_record(self, record_id: str, sidecar: Path) -> None:
+        self.data_root.mkdir(parents=True, exist_ok=True)
+        with self._index_lock:
+            index_path = self.data_root / "record-index.json"
+            index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+            index[record_id] = str(sidecar.resolve())
+            temporary = index_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.replace(index_path)
 
     def _cors_origin(self) -> str | None:
         origin = self.headers.get("Origin")
@@ -44,7 +69,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-File-Name")
             self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -56,7 +81,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-File-Name")
             self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
         self.end_headers()
 
@@ -133,7 +158,10 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/records/"):
             record_id = unquote(self.path.removeprefix("/records/")).strip()
             try:
-                _, sidecar = load_sidecar(self.data_root, record_id)
+                sidecar_path = self._record_sidecar(record_id)
+                sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                if sidecar.get("record_id") != record_id:
+                    raise FileNotFoundError(record_id)
                 self._json(HTTPStatus.OK, sidecar)
             except FileNotFoundError:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "record_not_found"})
@@ -146,13 +174,25 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             try:
                 payload = json.loads(self.rfile.read(length))
-                result = apply_correction(self.data_root, record_id, payload)
+                sidecar_path = self._record_sidecar(record_id)
+                result = apply_correction(sidecar_path.parent.parent, record_id, payload)
                 self._json(HTTPStatus.OK, result)
             except (FileNotFoundError, KeyError, ValueError, json.JSONDecodeError) as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
-        if self.path not in ("/ledger/import", "/ledger/upload", "/records/compile", "/transcribe"):
+        if self.path not in ("/ledger/import", "/ledger/upload", "/records/compile", "/transcribe", "/records/from-job"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+        if self.path == "/ledger/upload" and self.headers.get_content_type() == "application/octet-stream":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                original_name = unquote(self.headers.get("X-File-Name", "recording.audio"))
+                original_name = original_name.replace("\\", "/").split("/")[-1].strip()
+                original_name = "".join(char for char in original_name if ord(char) >= 32)[:255] or "recording.audio"
+                asset = self.ledger.import_stream(self.rfile, length, original_name)
+                self._json(HTTPStatus.CREATED, asset.__dict__)
+            except (ValueError, OSError) as error:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
         length = int(self.headers.get("Content-Length", "0"))
         try:
@@ -168,21 +208,88 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 return
             if self.path == "/transcribe":
                 provider_name = payload.get("provider", "fixture")
+                asset = None
+                if "asset_id" in payload:
+                    asset = self.ledger.get(payload["asset_id"])
+                    source = Path(asset.stored_path).resolve()
+                    if source.parent != self.ledger.objects.resolve() or not source.is_file():
+                        raise FileNotFoundError("audio asset is unavailable")
+                    source_name = asset.original_name
+                else:
+                    source = Path(payload["path"]).expanduser().resolve()
+                    source_name = payload.get("name", source.name)
                 if provider_name == "fixture":
                     provider = FixtureProvider()
                 elif provider_name == "whisper.cpp":
-                    provider = WhisperCppProvider(payload["executable"], payload["model"])
+                    provider = WhisperCppProvider(
+                        payload["executable"],
+                        payload["model"],
+                        payload.get("ffmpeg_executable", "ffmpeg"),
+                        source_name,
+                    )
                 else:
                     raise ValueError(f"unsupported provider: {provider_name}")
-                job = self.jobs.transcribe(payload["path"], provider)
-                self._json(HTTPStatus.CREATED, job.__dict__)
+                job = self.jobs.submit(source, provider)
+                self._json(HTTPStatus.ACCEPTED, job.__dict__)
+                return
+            if self.path == "/records/from-job":
+                job = self.jobs.get(payload["job_id"])
+                if job.status != "completed" or not job.transcript_path:
+                    raise ValueError(f"transcription job is not complete: {job.status}")
+                asset = self.ledger.get(payload["asset_id"])
+                source = Path(asset.stored_path).resolve()
+                if source.parent != self.ledger.objects.resolve() or not source.is_file():
+                    raise FileNotFoundError("audio asset is unavailable")
+                if Path(job.source_path).resolve() != source:
+                    raise ValueError("job source does not match audio asset")
+                title = payload["title"].strip()
+                forbidden = '<>:"/\\|?*\0'
+                reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+                if not title or title != title.strip() or title in {".", ".."} or any(char in title for char in forbidden):
+                    raise ValueError("title must be a filename, not a path")
+                if title.endswith((".", " ")) or title.split(".", 1)[0].upper() in reserved:
+                    raise ValueError("title is not a valid Windows filename")
+                if len(title) > 180 or any(ord(char) < 32 for char in title):
+                    raise ValueError("title is too long or contains control characters")
+                profile = payload.get("primary_mode", "knowledge")
+                if profile not in PROFILES:
+                    raise ValueError(f"unknown processing profile: {profile}")
+                transcript_path = Path(job.transcript_path).resolve()
+                if transcript_path.parent != self.jobs.root.resolve() or not transcript_path.is_file():
+                    raise FileNotFoundError("transcription output is unavailable")
+                transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+                record = ConversationRecord(
+                    id=str(uuid.uuid4()),
+                    title=title,
+                    created_at=datetime.now().astimezone().isoformat(),
+                    audio_path=str(source),
+                    primary_mode=profile,
+                    audio_asset_id=asset.id,
+                    context=payload.get("context", "未指定"),
+                    sensitivity=asset.sensitivity,
+                    transcript_provider=transcript.get("provider", job.provider),
+                    transcript_model=transcript.get("model"),
+                    transcript_language=transcript.get("language"),
+                    segments=[Segment(**segment) for segment in transcript.get("segments", [])],
+                )
+                vault = Path(payload["vault"]).expanduser().resolve()
+                destination = vault / "Recordings" / f"{title}.md"
+                if destination.exists():
+                    raise FileExistsError(f"recording already exists: {destination}")
+                destination = write_compiled(record, vault)
+                sidecar = vault / ".voice-memory" / "recordings" / f"{record.id}.json"
+                self._register_record(record.id, sidecar)
+                self._json(HTTPStatus.CREATED, {"record_id": record.id, "path": str(destination), "sidecar_path": str(sidecar), "asset_id": asset.id})
                 return
             record_data = payload["record"]
             record = ConversationRecord(**{key: value for key, value in record_data.items() if key != "segments"})
             record.segments = [Segment(**segment) for segment in record_data.get("segments", [])]
             destination = write_compiled(record, payload["vault"])
             sidecar = Path(payload["vault"]) / ".voice-memory" / "recordings" / f"{record.id}.json"
+            self._register_record(record.id, sidecar)
             self._json(HTTPStatus.CREATED, {"path": str(destination), "sidecar_path": str(sidecar), "record_id": record.id})
+        except FileExistsError as error:
+            self._json(HTTPStatus.CONFLICT, {"error": str(error)})
         except (KeyError, FileNotFoundError, ValueError, json.JSONDecodeError) as error:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
