@@ -3,6 +3,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import urllib.error
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from voice_memory import api
@@ -27,6 +28,53 @@ def test_transcription_provider_payloads_are_explicit():
     whisper = {"provider": "whisper.cpp", "path": "/tmp/recording.webm", "executable": "/opt/whisper-cli", "model": "/models/ggml-base.bin"}
     assert json.loads(json.dumps(fixture))["provider"] == "fixture"
     assert json.loads(json.dumps(whisper))["model"].endswith("ggml-base.bin")
+
+
+def test_api_rejects_untrusted_browser_origins_and_simple_content_types(tmp_path):
+    data_root = tmp_path / "data"
+    ledger = AudioLedger(data_root)
+    from voice_memory.jobs import JobStore
+    handler = type(
+        "SecurityTestHandler",
+        (VoiceMemoryHandler,),
+        {"data_root": data_root, "ledger": ledger, "jobs": JobStore(data_root)},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        upload = urllib.request.Request(
+            f"{base}/ledger/upload",
+            data=b"must not enter the ledger",
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-File-Name": "attack.webm",
+                "Origin": "https://untrusted.example",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(upload)
+            raise AssertionError("untrusted origin unexpectedly reached the upload route")
+        except urllib.error.HTTPError as error:
+            assert error.code == 403
+            assert json.load(error)["error"] == "untrusted_origin"
+        assert not list(ledger.objects.rglob("*"))
+
+        simple_post = urllib.request.Request(
+            f"{base}/records/compile",
+            data=b'{"record":{}}',
+            headers={"Content-Type": "text/plain", "Origin": "http://tauri.localhost"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(simple_post)
+            raise AssertionError("simple content type unexpectedly reached the JSON route")
+        except urllib.error.HTTPError as error:
+            assert error.code == 415
+            assert json.load(error)["error"] == "content_type_must_be_application_json"
+    finally:
+        server.shutdown()
 
 
 def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monkeypatch):

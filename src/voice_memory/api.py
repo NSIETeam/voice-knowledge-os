@@ -61,6 +61,16 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         return origin if origin in self.allowed_origins else None
 
+    def _trusted_request_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        return origin is None or origin in self.allowed_origins
+
+    def _reject_untrusted_origin(self) -> bool:
+        if self._trusted_request_origin():
+            return False
+        self._json(HTTPStatus.FORBIDDEN, {"error": "untrusted_origin"})
+        return True
+
     def _json(self, status: int, payload: Any) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -76,6 +86,8 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        if self._reject_untrusted_origin():
+            return
         self.send_response(204)
         origin = self._cors_origin()
         if origin:
@@ -86,6 +98,8 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
+        if self._reject_untrusted_origin():
+            return
         if self.path == "/":
             body = INDEX_HTML.encode("utf-8")
             self.send_response(HTTPStatus.OK)
@@ -169,7 +183,12 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._reject_untrusted_origin():
+            return
         if self.path.startswith("/records/") and self.path.endswith("/corrections"):
+            if self.headers.get_content_type() != "application/json":
+                self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "content_type_must_be_application_json"})
+                return
             record_id = unquote(self.path.removeprefix("/records/").removesuffix("/corrections")).strip()
             length = int(self.headers.get("Content-Length", "0"))
             try:
@@ -183,7 +202,10 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         if self.path not in ("/ledger/import", "/ledger/upload", "/records/compile", "/transcribe", "/records/from-job"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
-        if self.path == "/ledger/upload" and self.headers.get_content_type() == "application/octet-stream":
+        if self.path == "/ledger/upload":
+            if self.headers.get_content_type() != "application/octet-stream":
+                self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "content_type_must_be_application_octet_stream"})
+                return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 original_name = unquote(self.headers.get("X-File-Name", "recording.audio"))
@@ -193,6 +215,9 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.CREATED, asset.__dict__)
             except (ValueError, OSError) as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if self.headers.get_content_type() != "application/json":
+            self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "content_type_must_be_application_json"})
             return
         length = int(self.headers.get("Content-Length", "0"))
         try:
