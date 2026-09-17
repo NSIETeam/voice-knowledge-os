@@ -2,6 +2,8 @@
 
 This is the Windows/macOS-first Tauri 2 shell. The release workflow bundles the Python core as a PyInstaller sidecar and the shell starts it automatically; development mode can still use a manually started Python node.
 
+The current acceptance workflow targets Windows only; macOS validation reuses the previously built Apple Silicon installer and is out of scope for this Windows pass.
+
 ## Development
 
 1. Install the desktop dependencies: `npm install`.
