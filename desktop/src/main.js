@@ -8,6 +8,8 @@ const processStatus = document.querySelector('#processStatus');
 const assetImportButton = document.querySelector('#importAudio');
 const transcribeButton = document.querySelector('#transcribe');
 let nodeProcess;
+let nodeStartPromise;
+let appIsClosing = false;
 const apiUrl = 'http://127.0.0.1:8765';
 let currentAsset;
 let lastCompletedJob;
@@ -92,16 +94,40 @@ assetImportButton.addEventListener('click', async () => {
 });
 
 async function startNode() {
+  if (nodeProcess) return nodeProcess;
+  if (nodeStartPromise) return nodeStartPromise;
+  nodeStartPromise = (async () => {
+    const command = Command.sidecar('binaries/voice-memory-node', ['serve']);
+    command.on('close', (event) => {
+      nodeProcess = null;
+      if (!appIsClosing) {
+        status.className = 'warn';
+        status.textContent = `本地处理节点已退出（代码 ${event.code ?? '未知'}），可点击重新检查启动`;
+      }
+    });
+    command.on('error', (error) => {
+      status.className = 'warn';
+      status.textContent = `本地处理节点启动失败：${error}`;
+    });
+    nodeProcess = await command.spawn();
+    return nodeProcess;
+  })();
   try {
-    nodeProcess = await Command.sidecar('binaries/voice-memory-node', ['serve']);
-    await nodeProcess.spawn();
+    return await nodeStartPromise;
   } catch (error) {
+    nodeProcess = null;
     console.info('sidecar unavailable in browser/dev mode', error);
+    throw error;
+  } finally {
+    nodeStartPromise = null;
   }
 }
 
 window.addEventListener('beforeunload', () => {
-  void nodeProcess?.kill();
+  appIsClosing = true;
+  const child = nodeProcess;
+  nodeProcess = null;
+  if (child) void child.kill().catch((error) => console.warn('could not stop local sidecar', error));
 });
 
 async function check() {
@@ -125,13 +151,16 @@ async function check() {
 }
 
 async function waitForNode() {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     if (await check()) return;
-    await new Promise(resolve => setTimeout(resolve, 250));
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
 
-document.querySelector('#retry').addEventListener('click', check);
+document.querySelector('#retry').addEventListener('click', async () => {
+  try { await startNode(); } catch {}
+  await waitForNode();
+});
 let recorder;
 let chunks = [];
 document.querySelector('#record').addEventListener('click', async (event) => {
