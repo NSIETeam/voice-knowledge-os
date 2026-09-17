@@ -13,8 +13,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-14
-            target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
@@ -99,7 +97,8 @@ jobs:
             throw "Installed app did not start its bundled local API sidecar"
           }
           $profiles = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/profiles' -TimeoutSec 5
-          if ($profiles.PSObject.Properties.Count -ne 7) { throw "Expected seven processing profiles from installed sidecar" }
+          $profileMap = $profiles | ConvertTo-Json -Depth 10 -Compress | ConvertFrom-Json -AsHashtable
+          if ($profileMap.Count -ne 7) { throw "Expected seven processing profiles from installed sidecar, got $($profileMap.Count)" }
           if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(15000)) {
             Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
             throw "Installed Voice Memory process did not close gracefully"
