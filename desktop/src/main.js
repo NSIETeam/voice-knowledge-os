@@ -210,7 +210,10 @@ async function stopNodeForExit() {
   const child = nodeProcess;
   nodeProcess = null;
   if (child) {
-    try { await child.kill(); }
+    try {
+      if (navigator.userAgent.includes('Mac')) await invoke('terminate_sidecar_tree', {rootPid: child.pid});
+      else await child.kill();
+    }
     catch (error) {
       nodeProcess = child;
       appIsClosing = false;
