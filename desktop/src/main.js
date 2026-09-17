@@ -2,6 +2,7 @@ import { Command } from '@tauri-apps/plugin-shell';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
 import './styles.css';
 
 const status = document.querySelector('#status');
@@ -202,12 +203,7 @@ async function startNode() {
 
 // Windows owns the complete process tree in a native Job Object. Its cleanup
 // also works when the webview is unavailable or the desktop is forcibly killed.
-if (isTauri() && !navigator.userAgent.includes('Windows')) void getCurrentWindow().onCloseRequested(async (event) => {
-  if (!nodeProcess && !nodeStartPromise) return;
-  event.preventDefault();
-  if (closeCleanupStarted) return;
-  closeCleanupStarted = true;
-  appIsClosing = true;
+async function stopNodeForExit() {
   if (nodeStartPromise) {
     try { await nodeStartPromise; } catch { /* nothing to stop */ }
   }
@@ -220,11 +216,44 @@ if (isTauri() && !navigator.userAgent.includes('Windows')) void getCurrentWindow
       appIsClosing = false;
       closeCleanupStarted = false;
       status.textContent = `本地处理节点关闭失败：${error}`;
-      return;
+      throw error;
     }
   }
-  await getCurrentWindow().destroy();
-}).catch((error) => console.warn('could not register close handler', error));
+}
+
+if (isTauri() && !navigator.userAgent.includes('Windows')) {
+  void getCurrentWindow().onCloseRequested(async (event) => {
+    if (!nodeProcess && !nodeStartPromise && !navigator.userAgent.includes('Mac')) return;
+    event.preventDefault();
+    if (closeCleanupStarted) return;
+    closeCleanupStarted = true;
+    appIsClosing = true;
+    try {
+      await stopNodeForExit();
+      if (navigator.userAgent.includes('Mac')) await invoke('approve_app_exit');
+      else await getCurrentWindow().destroy();
+    } catch (error) {
+      appIsClosing = false;
+      closeCleanupStarted = false;
+      status.textContent = `本地处理节点关闭失败：${error}`;
+    }
+  }).catch((error) => console.warn('could not register close handler', error));
+
+  void listen('voice-memory://quit-requested', async () => {
+    if (closeCleanupStarted) return;
+    closeCleanupStarted = true;
+    appIsClosing = true;
+    try {
+      await stopNodeForExit();
+      await invoke('approve_app_exit');
+    } catch (error) {
+      appIsClosing = false;
+      closeCleanupStarted = false;
+      status.textContent = `本地处理节点关闭失败：${error}`;
+    }
+  }).catch((error) => console.warn('could not register app quit handler', error));
+  if (navigator.userAgent.includes('Mac')) void invoke('mark_ui_ready').catch((error) => console.warn('could not register native quit bridge', error));
+}
 
 async function check() {
   status.className = '';
