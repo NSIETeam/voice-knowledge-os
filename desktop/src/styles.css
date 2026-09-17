@@ -24,6 +24,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { min-width: 360px; scroll-behavior: smooth; scroll-padding-top: 28px; }
 body { margin: 0; min-height: 100vh; background: var(--canvas); }
 button, input, select { font: inherit; }
