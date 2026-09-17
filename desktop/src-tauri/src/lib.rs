@@ -16,6 +16,7 @@ pub fn run() {
             windows_audio::start_system_audio_capture,
             windows_audio::stop_system_audio_capture,
             approve_app_exit,
+            desktop_process_id,
         ]);
 
     #[cfg(target_os = "macos")]
@@ -25,10 +26,15 @@ pub fn run() {
         terminate_sidecar_tree,
         register_sidecar_pid,
         clear_sidecar_pid,
+        desktop_process_id,
     ]);
 
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    let builder = builder.invoke_handler(tauri::generate_handler![approve_app_exit, mark_ui_ready]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        approve_app_exit,
+        mark_ui_ready,
+        desktop_process_id,
+    ]);
 
     let app = builder
         .build(tauri::generate_context!())
@@ -93,6 +99,11 @@ fn register_sidecar_pid(pid: u32) -> Result<(), String> {
 #[tauri::command]
 fn clear_sidecar_pid() {
     SIDECAR_PID.store(0, std::sync::atomic::Ordering::Release);
+}
+
+#[tauri::command]
+fn desktop_process_id() -> u32 {
+    std::process::id()
 }
 
 #[tauri::command]

@@ -175,7 +175,11 @@ async function startNode() {
   if (nodeProcess) return nodeProcess;
   if (nodeStartPromise) return nodeStartPromise;
   nodeStartPromise = (async () => {
-    const command = Command.sidecar('binaries/voice-memory-node', ['serve']);
+    const args = ['serve'];
+    if (navigator.userAgent.includes('Mac')) {
+      args.push('--parent-pid', String(await invoke('desktop_process_id')));
+    }
+    const command = Command.sidecar('binaries/voice-memory-node', args);
     command.on('close', (event) => {
       nodeProcess = null;
       if (!appIsClosing) {

@@ -4,8 +4,10 @@ import json
 from urllib.parse import unquote
 import base64
 import mimetypes
+import os
 import re
 import threading
+import time
 import uuid
 from dataclasses import replace
 from datetime import datetime
@@ -377,7 +379,19 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
         return
 
 
-def serve(root: str, host: str = "127.0.0.1", port: int = 8765) -> None:
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def serve(root: str, host: str = "127.0.0.1", port: int = 8765, parent_pid: int | None = None) -> None:
+    if parent_pid is not None and (parent_pid <= 0 or parent_pid == os.getpid()):
+        raise ValueError("parent PID must identify a different live process")
     handler = type(
         "ConfiguredVoiceMemoryHandler",
         (VoiceMemoryHandler,),
@@ -385,4 +399,19 @@ def serve(root: str, host: str = "127.0.0.1", port: int = 8765) -> None:
     )
     server = ThreadingHTTPServer((host, port), handler)
     print(f"Voice Memory listening on http://{host}:{port}")
-    server.serve_forever()
+    if parent_pid is None:
+        server.serve_forever()
+        return
+
+    serving = threading.Thread(target=server.serve_forever, name="voice-memory-http", daemon=True)
+    serving.start()
+
+    def watch_parent() -> None:
+        while _process_exists(parent_pid):
+            time.sleep(0.25)
+        print("Voice Memory desktop parent exited; stopping local API")
+        server.shutdown()
+
+    threading.Thread(target=watch_parent, name="voice-memory-parent-watch", daemon=True).start()
+    serving.join()
+    server.server_close()

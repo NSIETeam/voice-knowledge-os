@@ -40,6 +40,7 @@ def main() -> None:
     server.add_argument("root", type=Path, nargs="?", default=Path.home() / ".voice-memory")
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=8765)
+    server.add_argument("--parent-pid", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.command == "profiles":
         print(json.dumps(PROFILES, ensure_ascii=False, indent=2))
@@ -47,7 +48,7 @@ def main() -> None:
         path = write_compiled(demo_record(), args.vault)
         print(path)
     elif args.command == "serve":
-        serve(str(args.root), args.host, args.port)
+        serve(str(args.root), args.host, args.port, args.parent_pid)
     else:
         record = ConversationRecord(**json.loads(args.record.read_text(encoding="utf-8")))
         record.segments = [Segment(**segment) for segment in record.segments]
