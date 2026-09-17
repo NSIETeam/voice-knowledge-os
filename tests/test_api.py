@@ -9,7 +9,8 @@ from pathlib import Path
 from voice_memory import api
 from voice_memory.api import INDEX_HTML, VoiceMemoryHandler
 from voice_memory.ledger import AudioLedger
-from voice_memory.models import Segment
+from voice_memory.models import ConversationRecord, Segment
+from voice_memory.processing import transcript_fingerprint
 from voice_memory.transcription import Transcript
 
 
@@ -149,5 +150,79 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
         correction = json.load(urllib.request.urlopen(correction_request))
         assert correction["record"]["segments"][0]["text"] == "人工复核内容"
         assert len(correction["correction_history"]) == 1
+
+        class StubSemanticProcessor:
+            def __init__(self, endpoint, model):
+                assert endpoint == "http://127.0.0.1:11434"
+                assert model == "fixture-model"
+
+            def process(self, record):
+                return {
+                    "schema_version": "voice-memory.analysis.v1",
+                    "provider": "ollama-local",
+                    "model": "fixture-model",
+                    "profile": record.primary_mode,
+                    "source_transcript_sha256": transcript_fingerprint(record),
+                    "generated_at": "2026-09-17T00:00:00+00:00",
+                    "summary": {"text": "有证据支持的本机候选总结", "evidence_ids": ["seg-1"]},
+                    "findings": [{"kind": "concepts", "text": "一个可核验概念", "evidence_ids": ["seg-1"]}],
+                }
+
+        monkeypatch.setattr(api, "LocalOllamaProcessor", StubSemanticProcessor)
+        semantic_payload = {
+            "job_id": job["id"], "asset_id": asset["id"], "title": "语义模型记录",
+            "primary_mode": "knowledge", "vault": str(tmp_path / "vault"),
+            "processor": "ollama-local", "processor_endpoint": "http://127.0.0.1:11434",
+            "processor_model": "fixture-model",
+        }
+        semantic_request = urllib.request.Request(
+            f"{base}/records/from-job",
+            data=json.dumps(semantic_payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(semantic_request) as response:
+            semantic_record = json.load(response)
+        semantic_markdown = Path(semantic_record["path"]).read_text(encoding="utf-8")
+        assert "本机模型整理建议（待审核）" in semantic_markdown
+        assert "有证据支持的本机候选总结" in semantic_markdown
+        assert "[[语义模型记录#^seg-1|原文 00:00]]" in semantic_markdown
+
+        semantic_sidecar = json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))
+        assert semantic_sidecar["analysis"]["model"] == "fixture-model"
+        semantic_correction_request = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/corrections",
+            data=json.dumps({"type": "edit_text", "segment_id": "seg-1", "text": "语义记录的人工校正"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(semantic_correction_request).close()
+        semantic_markdown = Path(semantic_record["path"]).read_text(encoding="utf-8")
+        assert "语义记录的人工校正" in semantic_markdown
+        assert "本机模型整理建议（已过期）" in semantic_markdown
+        assert "有证据支持的本机候选总结" not in semantic_markdown
+        corrected_sidecar = json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))
+        assert corrected_sidecar["analysis"]["summary"]["text"] == "有证据支持的本机候选总结"
+        reprocess_request = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess",
+            data=json.dumps({
+                "primary_mode": "knowledge", "processor_endpoint": "http://127.0.0.1:11434",
+                "processor_model": "fixture-model",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(reprocess_request) as response:
+            reprocessed = json.load(response)
+        assert reprocessed["analysis"]["source_transcript_sha256"] == transcript_fingerprint(
+            ConversationRecord(
+                **{key: value for key, value in reprocessed["record"].items() if key != "segments"},
+                segments=[Segment(**segment) for segment in reprocessed["record"]["segments"]],
+            )
+        )
+        assert len(json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))["correction_history"]) == 1
+        refreshed_markdown = Path(semantic_record["path"]).read_text(encoding="utf-8")
+        assert "本机模型整理建议（待审核）" in refreshed_markdown
+        assert "有证据支持的本机候选总结" in refreshed_markdown
     finally:
         server.shutdown()

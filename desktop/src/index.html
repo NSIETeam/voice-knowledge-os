@@ -42,11 +42,16 @@
         <label class="field"><span>FFmpeg 程序</span><input id="ffmpegPath" placeholder="ffmpeg（PATH）或选择 ffmpeg.exe" /><button id="chooseFfmpeg">选择程序</button></label>
         <p>音频与转写只在本机处理。首次使用需选择 whisper.cpp 程序和模型。浏览器录音及 M4A/WebM 等格式需要 FFmpeg；WAV、MP3、FLAC、OGG 可直接处理。</p>
       </details>
+      <details><summary>本地语义整理（可选，Ollama）</summary>
+        <label class="field"><span>Ollama 本机地址</span><input id="ollamaEndpoint" placeholder="http://127.0.0.1:11434" /><span></span></label>
+        <label class="field"><span>已安装的模型名称</span><input id="ollamaModel" placeholder="例如 qwen3:8b" /><span></span></label>
+        <p>留空则只生成转写与证据索引，不会伪造摘要。填写后由本机 Ollama 按所选模式整理；每条建议必须引用原文片段，并在笔记中标为“待审核”。语音、转写和模型请求都不会发送到云端。请先在本机安装 Ollama 并准备好模型。</p>
+      </details>
       <button id="transcribe" disabled>开始本地转写</button><p id="processStatus">先录音或导入音频</p>
     </div>
     <div class="card"><strong>Review Studio（证据复核）</strong>
       <p>输入记录 ID，修正转写或说话人标签。每次修改都会保留前后值并重新生成证据 Markdown。</p>
-      <div class="review-meta"><input id="reviewRecordId" placeholder="记录 ID" /><button id="loadReview">加载记录</button><button id="saveReview" disabled>保存修改</button></div>
+      <div class="review-meta"><input id="reviewRecordId" placeholder="记录 ID" /><button id="loadReview">加载记录</button><button id="saveReview" disabled>保存修改</button><button id="reanalyze" disabled>用本机模型重新整理</button></div>
       <p id="reviewStatus">未加载记录</p><audio id="reviewAudio" controls preload="metadata" style="width:100%;display:none"></audio><div id="reviewSegments"></div>
     </div>
     <div class="card"><strong>隐私边界</strong><p>桌面壳只访问本机 loopback API。录音、转写和声纹数据不会因为打开界面而上传。</p></div>

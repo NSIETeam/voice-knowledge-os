@@ -99,6 +99,9 @@ Turn one immutable record into multiple processing views without duplicating or 
 - Profile output lists the extraction contract and evidence references.
 - Re-running a profile updates only managed blocks.
 - A user-authored block remains byte-for-byte unchanged.
+- Optional local-model output is clearly marked as unreviewed; every summary/finding must cite valid source segment IDs and invalid citations are rejected.
+- A missing local model produces an explicit transcript-only note, never a fabricated summary or task.
+- The local processor endpoint is restricted to loopback; cloud processing is never an implicit fallback.
 
 ## 8. Obsidian sidecar protocol and preview changes
 
@@ -169,4 +172,3 @@ Publish a reproducible release with evidence across capture, processing, review,
 - macOS/Windows/Linux capture status is reported separately.
 - Local-only and provider-backed paths are tested separately.
 - A release is not called cross-platform until each platform has a real capture and review pass.
-

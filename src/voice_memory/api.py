@@ -19,6 +19,7 @@ from .jobs import JobStore
 from .models import ConversationRecord, PROFILES, Segment
 from .transcription import FixtureProvider, WhisperCppProvider
 from .review import apply_correction
+from .processing import LocalOllamaProcessor
 
 
 INDEX_HTML = """<!doctype html>
@@ -185,6 +186,43 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if self._reject_untrusted_origin():
             return
+        if self.path.startswith("/records/") and self.path.endswith("/reprocess"):
+            if self.headers.get_content_type() != "application/json":
+                self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "content_type_must_be_application_json"})
+                return
+            record_id = unquote(self.path.removeprefix("/records/").removesuffix("/reprocess")).strip()
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("request body must be a JSON object")
+                sidecar_path = self._record_sidecar(record_id)
+                sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                if sidecar.get("record_id") != record_id:
+                    raise FileNotFoundError(record_id)
+                data = dict(sidecar["record"])
+                record = ConversationRecord(**{key: value for key, value in data.items() if key != "segments"})
+                record.segments = [Segment(**segment) for segment in data.get("segments", [])]
+                if "primary_mode" in payload:
+                    if payload["primary_mode"] not in PROFILES:
+                        raise ValueError("unknown processing profile")
+                    record.primary_mode = payload["primary_mode"]
+                analysis = LocalOllamaProcessor(
+                    payload.get("processor_endpoint", "http://127.0.0.1:11434"),
+                    payload.get("processor_model", ""),
+                ).process(record)
+                vault = sidecar_path.parent.parent.parent
+                write_compiled(
+                    record,
+                    vault,
+                    correction_history=sidecar.get("correction_history", []),
+                    analysis=analysis,
+                )
+                updated = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                self._json(HTTPStatus.OK, {"record": updated["record"], "analysis": updated.get("analysis")})
+            except (FileNotFoundError, KeyError, ValueError, TypeError, json.JSONDecodeError) as error:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if self.path.startswith("/records/") and self.path.endswith("/corrections"):
             if self.headers.get_content_type() != "application/json":
                 self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "content_type_must_be_application_json"})
@@ -297,11 +335,21 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                     transcript_language=transcript.get("language"),
                     segments=[Segment(**segment) for segment in transcript.get("segments", [])],
                 )
+                processor_name = payload.get("processor")
+                if processor_name == "ollama-local":
+                    analysis = LocalOllamaProcessor(
+                        payload.get("processor_endpoint", "http://127.0.0.1:11434"),
+                        payload.get("processor_model", ""),
+                    ).process(record)
+                elif processor_name is None:
+                    analysis = None
+                else:
+                    raise ValueError(f"unsupported semantic processor: {processor_name}")
                 vault = Path(payload["vault"]).expanduser().resolve()
                 destination = vault / "Recordings" / f"{title}.md"
                 if destination.exists():
                     raise FileExistsError(f"recording already exists: {destination}")
-                destination = write_compiled(record, vault)
+                destination = write_compiled(record, vault, analysis=analysis)
                 sidecar = vault / ".voice-memory" / "recordings" / f"{record.id}.json"
                 self._register_record(record.id, sidecar)
                 self._json(HTTPStatus.CREATED, {"record_id": record.id, "path": str(destination), "sidecar_path": str(sidecar), "asset_id": asset.id})

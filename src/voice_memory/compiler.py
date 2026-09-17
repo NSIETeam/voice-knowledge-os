@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -11,6 +12,7 @@ from pathlib import Path
 from difflib import unified_diff
 
 from .models import ConversationRecord, PROFILES
+from .processing import transcript_fingerprint
 
 
 def _managed(section_id: str, body: str, version: int = 1) -> str:
@@ -123,7 +125,61 @@ def write_source_transcript_snapshot(record: ConversationRecord, vault: str | Pa
     return transcript_path
 
 
-def compile_record(record: ConversationRecord) -> str:
+_FINDING_LABELS = {
+    "concepts": "概念",
+    "claims": "论点",
+    "evidence": "证据",
+    "questions": "问题",
+    "links": "关联主题",
+    "problem": "问题定义",
+    "assumptions": "假设",
+    "options": "候选方案",
+    "decision": "决策",
+    "actions": "行动项",
+    "metrics": "验证指标",
+    "background": "背景",
+    "qa": "问答",
+    "needs": "需求",
+    "quotes": "原话",
+    "contradictions": "矛盾信息",
+    "insights": "洞察",
+    "positions": "立场",
+    "interests": "利益诉求",
+    "offers": "报价与条件",
+    "concessions": "让步",
+    "commitments": "承诺",
+    "open_terms": "未决条款",
+    "people": "人物信息",
+    "preferences": "偏好",
+    "events": "事件",
+    "agreements": "约定",
+    "followups": "后续跟进",
+    "facts": "事实",
+    "timeline": "时间线",
+    "participants": "参与者",
+    "provenance": "出处",
+    "agenda": "议程",
+    "progress": "进展",
+    "risks": "风险",
+    "owners": "负责人",
+    "deadlines": "截止时间",
+    "next_steps": "下一步",
+}
+
+
+def _evidence_links(record: ConversationRecord, evidence_ids: list[str]) -> str:
+    by_id = {segment.id: segment for segment in record.segments}
+    return "、".join(by_id[segment_id].evidence(record.title) for segment_id in evidence_ids)
+
+
+def _model_text(text: str) -> str:
+    escaped = html.escape(text.strip(), quote=False)
+    for char, entity in (("[", "&#91;"), ("]", "&#93;"), ("`", "&#96;")):
+        escaped = escaped.replace(char, entity)
+    return escaped.replace("\r", " ").replace("\n", " ")
+
+
+def compile_record(record: ConversationRecord, analysis: dict | None = None) -> str:
     profile = PROFILES.get(record.primary_mode, {"name": record.primary_mode, "extract": []})
     people = "\n".join(f"  - {person}" for person in record.people) or "  - 未确认"
     segment_lines = []
@@ -144,7 +200,7 @@ def compile_record(record: ConversationRecord) -> str:
     ) or "- _处理后将自动生成证据引用。_"
     links = "\n".join(f"- {value}" for value in [*record.people, record.company, record.project] if value)
     links = links or "- _暂无关联对象。_"
-    actions = "\n".join(f"- [ ] 待从“{profile['name']}”处理器确认行动项" for _ in [0])
+    actions = "_未运行语义处理；不会自动创建任务。_"
     metadata = {
         "voice_memory_id": record.id,
         "created_at": record.created_at,
@@ -154,15 +210,52 @@ def compile_record(record: ConversationRecord) -> str:
         "sensitivity": record.sensitivity,
         "audio": record.audio_path,
         "audio_asset_id": record.audio_asset_id,
+        "semantic_processor": analysis.get("provider") if analysis else None,
+        "semantic_model": json.dumps(analysis.get("model"), ensure_ascii=False) if analysis else "null",
+        "semantic_analysis_current": False,
     }
+    analysis_current = bool(
+        analysis
+        and analysis.get("profile") == record.primary_mode
+        and analysis.get("source_transcript_sha256") == transcript_fingerprint(record)
+    )
+    metadata["semantic_analysis_current"] = analysis_current
     yaml = "\n".join(
         ["---"] + [f"{key}: {value}" for key, value in metadata.items()] + ["people:", people, "---"]
     )
-    summary = (
-        f"## 执行摘要\n\n"
-        f"本记录使用“{profile['name']}”处理器，当前提取维度：{', '.join(profile['extract'])}。\n\n"
-        f"_摘要必须能够回到下方原始证据；未经用户确认的身份和结论不得视为事实。_"
-    )
+    if analysis_current:
+        summary_text = _model_text(analysis["summary"]["text"])
+        summary_refs = _evidence_links(record, analysis["summary"]["evidence_ids"])
+        findings = "\n".join(
+            f"- **{_FINDING_LABELS.get(item['kind'], item['kind'])}**：{_model_text(item['text'])}（{_evidence_links(record, item['evidence_ids'])}）"
+            for item in analysis["findings"]
+        ) or "- _本机模型未提取到有证据支撑的条目。_"
+        summary = (
+            f"## 本机模型整理建议（待审核）\n\n{summary_text}（{summary_refs}）\n\n"
+            f"### {profile['name']}提取项（待审核）\n\n{findings}\n\n"
+            "_以上是本机模型生成的候选内容，不代表已确认事实；请逐条打开证据核验。_"
+        )
+        if profile.get("create_tasks"):
+            task_kinds = {"actions", "commitments", "followups", "next_steps"}
+            candidates = [item for item in analysis["findings"] if item["kind"] in task_kinds]
+            actions = "\n".join(
+                f"- [ ] {_model_text(item['text'])}（待审核；{_evidence_links(record, item['evidence_ids'])}）"
+                for item in candidates
+            ) or "_模型没有提出带来源证据的行动项。_"
+            actions = "## 候选行动项（待用户确认）\n\n" + actions
+    elif analysis:
+        summary = (
+            "## 本机模型整理建议（已过期）\n\n"
+            "转写文本、说话人或处理模式在本机模型处理后发生变化。为避免旧结论继续冒充当前证据，"
+            "旧分析暂不显示；原结果仍保存在机器 sidecar 中。请重新运行本机语义处理。"
+        )
+        actions = "_语义结果已过期；重新处理并复核前不会显示或创建候选任务。_"
+    else:
+        summary = (
+            "## 执行摘要\n\n"
+            "未配置或未运行本机语义模型。本记录只包含原始转写和可定位证据，不生成摘要或行动项。\n\n"
+            f"处理模式：{profile['name']}；提取契约：{', '.join(profile['extract'])}。"
+        )
     return "\n\n".join([
         yaml,
         f"# {record.title}",
@@ -171,7 +264,12 @@ def compile_record(record: ConversationRecord) -> str:
         _managed("associations", "## 关联对象\n\n" + links),
         _managed("evidence", "## 证据索引\n\n" + evidence),
         _managed("transcript", "## 原始转写\n\n" + transcript),
-        _managed("processing", "## 处理记录\n\n- 首次编译：" + datetime.now(timezone.utc).isoformat()),
+        _managed(
+            "processing",
+            "## 处理记录\n\n- 最近重编译：" + datetime.now(timezone.utc).isoformat()
+            + (f"\n- 本机语义处理：{analysis['provider']} / {analysis['model']}（{analysis.get('generated_at', '时间未知')}）" if analysis else "\n- 本机语义处理：未运行")
+            + ("\n- 状态：原文、说话人或处理模式已变化；旧分析已标记过期。" if analysis and not analysis_current else ""),
+        ),
         "",
     ])
 
@@ -180,6 +278,7 @@ def write_compiled(
     record: ConversationRecord,
     vault: str | Path,
     correction_history: list[dict] | None = None,
+    analysis: dict | None = None,
 ) -> Path:
     vault_path = Path(vault)
     destination = vault_path / "Recordings" / f"{record.title}.md"
@@ -188,6 +287,12 @@ def write_compiled(
     sidecar_dir = machine_root / "recordings"
     rollback_dir = machine_root / "rollback" / record.id
     sidecar_dir.mkdir(parents=True, exist_ok=True)
+    previous_sidecar = sidecar_dir / f"{record.id}.json"
+    if analysis is None and previous_sidecar.is_file():
+        try:
+            analysis = json.loads(previous_sidecar.read_text(encoding="utf-8")).get("analysis")
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("existing Voice Memory sidecar is unreadable; refusing to discard its analysis") from error
     existing_markdown: str | None = None
     if destination.exists():
         with destination.open("r", encoding="utf-8", newline="") as stream:
@@ -196,7 +301,7 @@ def write_compiled(
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         shutil.copyfile(destination, rollback_dir / f"{stamp}.md")
 
-    rendered = compile_record(record)
+    rendered = compile_record(record, analysis)
     final_markdown = _merge_managed(existing_markdown, rendered) if existing_markdown is not None else rendered
     if existing_markdown is not None:
         diff_dir = machine_root / "diffs" / record.id
@@ -234,6 +339,7 @@ def write_compiled(
         "model": record.transcript_model,
         "language": record.transcript_language,
         "processing_profile": record.primary_mode,
+        "analysis": analysis,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "markdown_path": str(destination),
         "record": record.to_dict(),

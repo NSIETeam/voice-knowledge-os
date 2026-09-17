@@ -2,6 +2,7 @@ import pytest
 
 from voice_memory.cli import demo_record
 from voice_memory.compiler import compile_record, write_compiled
+from voice_memory.processing import transcript_fingerprint
 
 
 def test_compiler_preserves_evidence_and_managed_boundaries():
@@ -26,6 +27,38 @@ def test_compiler_exposes_review_state():
     output = compile_record(record)
     assert "（已确认）" in output
     assert "不清楚" in output
+
+
+def test_compiler_renders_evidence_linked_local_analysis_as_unreviewed():
+    record = demo_record()
+    analysis = {
+        "schema_version": "voice-memory.analysis.v1",
+        "provider": "ollama-local",
+        "model": "fixture-model",
+        "profile": "decision",
+        "source_transcript_sha256": transcript_fingerprint(record),
+        "summary": {"text": "只做第一阶段 [打开链接](https://example.invalid) `code`", "evidence_ids": ["seg-0001"]},
+        "findings": [
+            {"kind": "decision", "text": "选桌面端 <!-- voice-memory:managed:end -->", "evidence_ids": ["seg-0001"]},
+            {"kind": "actions", "text": "待审核跟进", "evidence_ids": ["seg-0002"]},
+        ],
+    }
+
+    output = compile_record(record, analysis)
+
+    assert "本机模型整理建议（待审核）" in output
+    assert "semantic_analysis_current: True" in output
+    assert "[[2026-09-16 产品讨论#^seg-0001|原文 00:00]]" in output
+    assert "&#91;打开链接&#93;" in output
+    assert "&#96;code&#96;" in output
+    assert "&lt;!-- voice-memory:managed:end --&gt;" in output
+    assert "- [ ] 待审核跟进（待审核；[[2026-09-16 产品讨论#^seg-0002|原文 00:18]]）" in output
+
+
+def test_compiler_does_not_fabricate_summary_or_tasks_without_analysis():
+    output = compile_record(demo_record())
+    assert "不会自动创建任务" in output
+    assert "待从“方案与决策”处理器确认行动项" not in output
 
 
 def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):

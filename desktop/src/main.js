@@ -10,11 +10,15 @@ const transcribeButton = document.querySelector('#transcribe');
 let nodeProcess;
 const apiUrl = 'http://127.0.0.1:8765';
 let currentAsset;
+let lastCompletedJob;
 
-for (const id of ['vaultPath', 'whisperPath', 'modelPath', 'ffmpegPath']) {
+for (const id of ['vaultPath', 'whisperPath', 'modelPath', 'ffmpegPath', 'ollamaModel']) {
   document.querySelector(`#${id}`).value = localStorage.getItem(`voice-memory.${id}`) || '';
   document.querySelector(`#${id}`).addEventListener('change', (event) => localStorage.setItem(`voice-memory.${id}`, event.target.value));
 }
+const ollamaEndpoint = document.querySelector('#ollamaEndpoint');
+ollamaEndpoint.value = localStorage.getItem('voice-memory.ollamaEndpoint') || 'http://127.0.0.1:11434';
+ollamaEndpoint.addEventListener('change', () => localStorage.setItem('voice-memory.ollamaEndpoint', ollamaEndpoint.value));
 
 function refreshActions() {
   const ready = Boolean(currentAsset && document.querySelector('#vaultPath').value.trim() && document.querySelector('#whisperPath').value.trim() && document.querySelector('#modelPath').value.trim());
@@ -59,6 +63,7 @@ async function uploadAudio(blob, name) {
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  if (currentAsset?.id !== result.id) lastCompletedJob = null;
   currentAsset = result;
   assetStatus.textContent = `已保存：${result.original_name} · ${result.size_bytes} bytes · SHA-256 ${result.sha256.slice(0, 12)}…`;
   refreshActions();
@@ -68,6 +73,7 @@ async function uploadAudio(blob, name) {
 document.querySelector('#audioFile').addEventListener('change', (event) => {
   assetImportButton.disabled = !event.target.files?.length;
   currentAsset = null;
+  lastCompletedJob = null;
   assetStatus.textContent = event.target.files?.length ? '已选择文件，点击“导入账本”' : '尚未选择音频';
   refreshActions();
   const file = event.target.files?.[0];
@@ -154,6 +160,7 @@ let reviewRecord;
 const reviewStatus = document.querySelector('#reviewStatus');
 const reviewSegments = document.querySelector('#reviewSegments');
 const saveReview = document.querySelector('#saveReview');
+const reanalyzeButton = document.querySelector('#reanalyze');
 const reviewAudio = document.querySelector('#reviewAudio');
 
 function reviewBadge(status) {
@@ -214,6 +221,7 @@ function renderReview(record) {
     reviewSegments.append(article);
   }
   saveReview.disabled = false;
+  reanalyzeButton.disabled = !document.querySelector('#ollamaModel').value.trim();
 }
 
 document.querySelector('#loadReview').addEventListener('click', async () => {
@@ -224,9 +232,38 @@ document.querySelector('#loadReview').addEventListener('click', async () => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const sidecar = await response.json();
     reviewRecord = sidecar.record;
+    document.querySelector('#profile').value = reviewRecord.primary_mode;
     renderReview(reviewRecord);
     reviewStatus.textContent = `已加载 ${reviewRecord.title}，历史修正 ${sidecar.correction_history?.length || 0} 次`;
   } catch (error) { reviewStatus.textContent = `加载失败：${error.message}`; reviewSegments.replaceChildren(); saveReview.disabled = true; }
+});
+
+document.querySelector('#ollamaModel').addEventListener('input', () => {
+  reanalyzeButton.disabled = !reviewRecord || !document.querySelector('#ollamaModel').value.trim();
+});
+
+reanalyzeButton.addEventListener('click', async () => {
+  if (!reviewRecord) return;
+  reanalyzeButton.disabled = true;
+  reviewStatus.textContent = '正在本机重新整理当前已校正转写…';
+  try {
+    const response = await fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}/reprocess`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({primary_mode:document.querySelector('#profile').value, processor_endpoint:ollamaEndpoint.value.trim(), processor_model:document.querySelector('#ollamaModel').value.trim()}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    const refreshed = await fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}`);
+    if (!refreshed.ok) throw new Error(`刷新记录失败：HTTP ${refreshed.status}`);
+    const sidecar = await refreshed.json();
+    reviewRecord = sidecar.record;
+    document.querySelector('#profile').value = reviewRecord.primary_mode;
+    renderReview(reviewRecord);
+    reviewStatus.textContent = '本机整理完成；结果已关联当前转写，仍需逐条核验。';
+  } catch (error) {
+    reviewStatus.textContent = `重新整理失败：${error.message}`;
+    reanalyzeButton.disabled = !reviewRecord || !document.querySelector('#ollamaModel').value.trim();
+  }
 });
 
 transcribeButton.addEventListener('click', async () => {
@@ -235,31 +272,37 @@ transcribeButton.addEventListener('click', async () => {
   if (!title) { processStatus.textContent = '请填写记录标题'; return; }
   transcribeButton.disabled = true;
   try {
-    processStatus.textContent = '已加入本地转写队列…';
-    const response = await fetch(`${apiUrl}/transcribe`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({asset_id:currentAsset.id, provider:'whisper.cpp', executable:document.querySelector('#whisperPath').value.trim(), model:document.querySelector('#modelPath').value.trim(), ffmpeg_executable:document.querySelector('#ffmpegPath').value.trim() || 'ffmpeg'}),
-    });
-    const job = await response.json();
-    if (!response.ok) throw new Error(job.error || `HTTP ${response.status}`);
-    let current;
-    do {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const poll = await fetch(`${apiUrl}/jobs/${encodeURIComponent(job.id)}`);
-      current = await poll.json();
-      if (!poll.ok) throw new Error(current.error || `HTTP ${poll.status}`);
-      processStatus.textContent = current.status === 'running' ? '正在本机转写，请稍候…' : '转写任务已排队…';
-    } while (current.status === 'queued' || current.status === 'running');
-    if (current.status !== 'completed') throw new Error(current.error || '本地转写失败');
-    processStatus.textContent = '转写完成，正在生成证据记录…';
+    let job = lastCompletedJob?.assetId === currentAsset.id ? lastCompletedJob : null;
+    if (!job) {
+      processStatus.textContent = '已加入本地转写队列…';
+      const response = await fetch(`${apiUrl}/transcribe`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({asset_id:currentAsset.id, provider:'whisper.cpp', executable:document.querySelector('#whisperPath').value.trim(), model:document.querySelector('#modelPath').value.trim(), ffmpeg_executable:document.querySelector('#ffmpegPath').value.trim() || 'ffmpeg'}),
+      });
+      job = await response.json();
+      if (!response.ok) throw new Error(job.error || `HTTP ${response.status}`);
+      let current;
+      do {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const poll = await fetch(`${apiUrl}/jobs/${encodeURIComponent(job.id)}`);
+        current = await poll.json();
+        if (!poll.ok) throw new Error(current.error || `HTTP ${poll.status}`);
+        processStatus.textContent = current.status === 'running' ? '正在本机转写，请稍候…' : '转写任务已排队…';
+      } while (current.status === 'queued' || current.status === 'running');
+      if (current.status !== 'completed') throw new Error(current.error || '本地转写失败');
+      lastCompletedJob = {id: job.id, assetId: currentAsset.id};
+    }
+    const semanticModel = document.querySelector('#ollamaModel').value.trim();
+    processStatus.textContent = semanticModel ? '转写完成，正在调用本机模型整理并校验证据…' : '转写完成，正在生成原文与证据索引（未配置语义模型）…';
     const compile = await fetch(`${apiUrl}/records/from-job`, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({job_id:job.id, asset_id:currentAsset.id, title, primary_mode:document.querySelector('#profile').value, vault:document.querySelector('#vaultPath').value.trim()}),
+      body:JSON.stringify({job_id:job.id, asset_id:currentAsset.id, title, primary_mode:document.querySelector('#profile').value, vault:document.querySelector('#vaultPath').value.trim(), ...(semanticModel ? {processor:'ollama-local', processor_endpoint:ollamaEndpoint.value.trim(), processor_model:semanticModel} : {})}),
     });
     const result = await compile.json();
     if (!compile.ok) throw new Error(result.error || `HTTP ${compile.status}`);
     document.querySelector('#reviewRecordId').value = result.record_id;
     await document.querySelector('#loadReview').click();
+    lastCompletedJob = null;
     processStatus.textContent = `完成：已写入 Vault · ${result.path}`;
   } catch (error) {
     processStatus.textContent = `处理失败：${error.message}`;
