@@ -224,8 +224,9 @@ async function stopNodeForExit() {
   }
 }
 
+let desktopStartReady = Promise.resolve();
 if (isTauri() && !navigator.userAgent.includes('Windows')) {
-  void getCurrentWindow().onCloseRequested(async (event) => {
+  const closeRequestedReady = getCurrentWindow().onCloseRequested(async (event) => {
     if (!nodeProcess && !nodeStartPromise && !navigator.userAgent.includes('Mac')) return;
     event.preventDefault();
     if (closeCleanupStarted) return;
@@ -240,9 +241,9 @@ if (isTauri() && !navigator.userAgent.includes('Windows')) {
       closeCleanupStarted = false;
       status.textContent = `本地处理节点关闭失败：${error}`;
     }
-  }).catch((error) => console.warn('could not register close handler', error));
+  });
 
-  void listen('voice-memory://quit-requested', async () => {
+  const appQuitReady = listen('voice-memory://quit-requested', async () => {
     if (closeCleanupStarted) return;
     closeCleanupStarted = true;
     appIsClosing = true;
@@ -254,8 +255,11 @@ if (isTauri() && !navigator.userAgent.includes('Windows')) {
       closeCleanupStarted = false;
       status.textContent = `本地处理节点关闭失败：${error}`;
     }
-  }).catch((error) => console.warn('could not register app quit handler', error));
-  if (navigator.userAgent.includes('Mac')) void invoke('mark_ui_ready').catch((error) => console.warn('could not register native quit bridge', error));
+  });
+  desktopStartReady = Promise.all([closeRequestedReady, appQuitReady]).then(async () => {
+    if (navigator.userAgent.includes('Mac')) await invoke('mark_ui_ready');
+  });
+  desktopStartReady.catch((error) => console.warn('could not register app quit handlers', error));
 }
 
 async function check() {
@@ -528,4 +532,4 @@ saveReview.addEventListener('click', async () => {
   } catch (error) { reviewStatus.textContent = `保存失败：${error.message}`; saveReview.disabled = false; }
 });
 
-startNode().then(waitForNode).catch(waitForNode);
+desktopStartReady.then(() => startNode()).then(waitForNode).catch(waitForNode);
