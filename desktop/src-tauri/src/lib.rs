@@ -102,9 +102,35 @@ fn terminate_sidecar_tree(root_pid: u32) -> Result<(), String> {
     if !root_command.contains("voice-memory-node") {
         return Err(format!("PID {root_pid} is not the Voice Memory sidecar"));
     }
+    let executable_end = root_command
+        .find("/Contents/MacOS/voice-memory-node")
+        .map(|index| index + "/Contents/MacOS/voice-memory-node".len())
+        .ok_or_else(|| format!("PID {root_pid} is not running from a packaged app"))?;
+    let executable = &root_command[..executable_end];
 
     let mut tree = Vec::new();
     descendants(root_pid, &mut tree)?;
+    let all_processes = Command::new("/bin/ps")
+        .args(["-Ao", "pid=,command="])
+        .output()
+        .map_err(|error| format!("could not enumerate sidecar processes: {error}"))?;
+    for line in String::from_utf8_lossy(&all_processes.stdout).lines() {
+        let Some((pid, command)) = line.trim().split_once(char::is_whitespace) else {
+            continue;
+        };
+        let (Ok(pid), command) = (pid.trim().parse::<u32>(), command.trim()) else {
+            continue;
+        };
+        if command
+            .strip_prefix(executable)
+            .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with(char::is_whitespace))
+        {
+            tree.push(pid);
+        }
+    }
+    tree.sort_unstable();
+    tree.dedup();
+    eprintln!("Voice Memory sidecar shutdown: executable={executable:?}, pids={tree:?}");
     for pid in &tree {
         let _ = Command::new("/bin/kill")
             .args(["-TERM", &pid.to_string()])
