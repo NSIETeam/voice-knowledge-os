@@ -1,6 +1,6 @@
 # Desktop release acceptance
 
-Evidence for the current desktop milestone is GitHub Actions run [35150265469](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35150265469). Core regression evidence is the full 9-job Python matrix in [run 35152815657](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35152815657). macOS Apple Silicon continues to use the previously accepted local artifact; current packaging focus is Windows x64.
+Evidence for commit `dca607e` is the full 9-job Python matrix in [run 35166916370](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35166916370) and the desktop packaging/installer run [35166916389](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35166916389). macOS Apple Silicon continues to use the previously accepted local artifact; current product and acceptance focus is Windows x64.
 
 | Target | Result | Artifact |
 |---|---|---|
@@ -21,9 +21,10 @@ The generated artifacts were downloaded and inspected locally:
 - This build includes the Review Studio desktop UI and its local correction API; the frontend production bundle and both platform desktop builds completed successfully.
 - The Review Studio can seek to a segment offset in a ledger-backed source audio asset; the loopback API was independently tested with an HTTP byte-range request and returned the requested partial content.
 - The original ASR transcript is stored write-once under `.voice-memory/transcripts/` separately from reviewed record sidecars and correction events.
-- The full test suite passed on Windows, macOS, and Ubuntu for Python 3.11, 3.12, and 3.13: 16 tests per matrix job.
+- The full test suite passed on Windows, macOS, and Ubuntu for Python 3.11, 3.12, and 3.13: 23 tests per matrix job, including Vault managed-block preservation, malformed-block refusal, rollback, diff, and CRLF tests.
 - The desktop shell requests termination of its own sidecar on window teardown; a separate packaged-install exit/relaunch test is still required on each target OS.
-- The independently downloaded Windows MSI SHA-256 is `19ab0bf34b146e8b67b9b435085779b5a1289d0b46d29431a2e896193d425e7e`; the artifact's manifest check passed.
+- The independently downloaded Windows MSI from run `35166916389` has SHA-256 `0baeebff93b5f0db6aab17bbc649fe1faea2fcadce1b2b27e4752c0bf1246e99`; its bundled manifest check passed.
+- Recompilation now updates only Voice Memory managed blocks; user-authored content between those blocks is preserved, malformed boundaries and pre-existing unmanaged notes fail closed, and overwrites get atomic writes, rollback copies, and a unified diff under `.voice-memory/diffs/`.
 - Artifact hashes are recorded in the run's downloaded files; a signed release hash manifest is still required before public distribution.
 
-This is a productization milestone, not a formal public release. The artifacts are unsigned/notarization-unverified. macOS Apple Silicon has a local install/runtime smoke test; Windows now has a CI install/launch smoke test, but no physical Windows audio-device acceptance has been performed here. System-audio capture, production transcription/diarization providers, Obsidian integration, update delivery, and signed distribution remain open product work.
+This is a productization milestone, not a formal public release. The artifacts are unsigned/notarization-unverified. macOS Apple Silicon has a local install/runtime smoke test; Windows has a CI install/launch smoke test, but no physical Windows audio-device acceptance has been performed here. System-audio capture, real-model Windows inference, diarization, the native Obsidian plugin, update delivery, and signed distribution remain open product work. The desktop currently writes Markdown and machine-readable sidecars directly into a selected Vault; that is not equivalent to a complete Obsidian plugin integration.
