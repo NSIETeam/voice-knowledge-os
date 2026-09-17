@@ -75,9 +75,31 @@ jobs:
           $exe = Get-ChildItem -Path "$env:ProgramFiles\Voice Memory" -Filter *.exe -Recurse | Select-Object -First 1
           if (-not $exe) { throw "Installed Voice Memory executable not found" }
           $app = Start-Process -FilePath $exe.FullName -PassThru
-          Start-Sleep -Seconds 5
-          if ($app.HasExited) { throw "Installed Voice Memory process exited during launch smoke test" }
-          Stop-Process -Id $app.Id -Force
+          $health = $null
+          for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            if ($app.HasExited) { throw "Installed Voice Memory process exited during startup" }
+            try {
+              $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/health' -TimeoutSec 2
+              break
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $health -or $health.status -ne 'ok' -or $health.service -ne 'voice-memory') {
+            throw "Installed app did not start its bundled local API sidecar"
+          }
+          $profiles = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/profiles' -TimeoutSec 5
+          if ($profiles.PSObject.Properties.Count -ne 7) { throw "Expected seven processing profiles from installed sidecar" }
+          if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(15000)) {
+            Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+            throw "Installed Voice Memory process did not close gracefully"
+          }
+          $sidecarStopped = $false
+          for ($attempt = 0; $attempt -lt 10; $attempt++) {
+            try {
+              Invoke-RestMethod -Uri 'http://127.0.0.1:8765/health' -TimeoutSec 1 | Out-Null
+              Start-Sleep -Seconds 1
+            } catch { $sidecarStopped = $true; break }
+          }
+          if (-not $sidecarStopped) { throw "Bundled local API sidecar remained running after the app closed" }
       - name: Upload desktop bundles
         if: success()
         uses: actions/upload-artifact@v4

@@ -2,6 +2,8 @@
 
 Evidence for product commit `5d8ad08` is the full 9-job Python matrix in [run 35167805609](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35167805609) and the desktop packaging/installer run [35167805558](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35167805558). macOS Apple Silicon continues to use the previously accepted local artifact; current product and acceptance focus is Windows x64.
 
+The evidence above predates the local semantic-processing implementation in `f2515ac`. The current Windows workflow is being strengthened to verify the installed app's sidecar health, profile API, and graceful sidecar shutdown; those new gates have not run yet. The prior green MSI smoke must not be treated as acceptance of `f2515ac` or the updated workflow.
+
 | Target | Result | Artifact |
 |---|---|---|
 | macOS Apple Silicon | Build and bundle passed | `voice-memory-aarch64-apple-darwin` |

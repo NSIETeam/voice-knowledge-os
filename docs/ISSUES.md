@@ -171,4 +171,5 @@ Publish a reproducible release with evidence across capture, processing, review,
 - CI artifacts include hashes and schema versions.
 - macOS/Windows/Linux capture status is reported separately.
 - Local-only and provider-backed paths are tested separately.
+- Windows MSI smoke installs and launches the app, verifies the bundled sidecar health/profile API, and confirms the sidecar exits when the desktop closes.
 - A release is not called cross-platform until each platform has a real capture and review pass.
