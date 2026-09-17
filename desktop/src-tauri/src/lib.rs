@@ -1,5 +1,8 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "windows")]
+    windows_process::contain_process_tree();
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init());
@@ -21,3 +24,6 @@ mod audio_wav;
 
 #[cfg(target_os = "windows")]
 mod windows_audio;
+
+#[cfg(target_os = "windows")]
+mod windows_process;

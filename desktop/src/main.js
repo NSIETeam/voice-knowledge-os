@@ -1,6 +1,6 @@
 import { Command } from '@tauri-apps/plugin-shell';
 import { open } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const status = document.querySelector('#status');
@@ -128,7 +128,9 @@ async function startNode() {
   }
 }
 
-void getCurrentWindow().onCloseRequested(async (event) => {
+// Windows owns the complete process tree in a native Job Object. Its cleanup
+// also works when the webview is unavailable or the desktop is forcibly killed.
+if (isTauri() && !navigator.userAgent.includes('Windows')) void getCurrentWindow().onCloseRequested(async (event) => {
   if (!nodeProcess && !nodeStartPromise) return;
   event.preventDefault();
   if (closeCleanupStarted) return;
@@ -141,10 +143,16 @@ void getCurrentWindow().onCloseRequested(async (event) => {
   nodeProcess = null;
   if (child) {
     try { await child.kill(); }
-    catch (error) { console.warn('could not stop local sidecar', error); }
+    catch (error) {
+      nodeProcess = child;
+      appIsClosing = false;
+      closeCleanupStarted = false;
+      status.textContent = `本地处理节点关闭失败：${error}`;
+      return;
+    }
   }
   await getCurrentWindow().destroy();
-});
+}).catch((error) => console.warn('could not register close handler', error));
 
 async function check() {
   status.className = '';

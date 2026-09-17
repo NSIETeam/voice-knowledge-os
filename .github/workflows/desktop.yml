@@ -7,6 +7,7 @@ on:
       - "desktop/**"
       - "src/**"
       - "pyproject.toml"
+      - ".github/workflows/desktop.yml"
 
 jobs:
   build-shell:
@@ -19,6 +20,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Validate acceptance script before packaging
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/desktop/scripts/windows-install-smoke.ps1", [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -59,7 +67,7 @@ jobs:
       - name: Test Windows capture adapter and desktop Rust target
         if: matrix.os == 'windows-latest'
         working-directory: desktop
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+        run: cargo test --release --target ${{ matrix.target }} --locked --manifest-path src-tauri/Cargo.toml
       - name: Build desktop shell
         working-directory: desktop
         run: npm run build -- --target ${{ matrix.target }}
@@ -70,47 +78,14 @@ jobs:
         if: matrix.os == 'windows-latest'
         working-directory: desktop
         shell: pwsh
-        run: |
-          $msi = Get-ChildItem -Path src-tauri/target -Filter *.msi -Recurse | Select-Object -First 1
-          if (-not $msi) { throw "Windows MSI not found" }
-          $log = Join-Path $env:TEMP 'voice-memory-msi.log'
-          $arguments = "/i `"$($msi.FullName)`" /qn /norestart /L*v `"$log`""
-          $install = Start-Process msiexec.exe -ArgumentList $arguments -PassThru
-          if (-not $install.WaitForExit(120000)) {
-            Stop-Process -Id $install.Id -Force
-            if (Test-Path $log) { Get-Content $log -Tail 80 }
-            throw "msiexec did not finish within 120 seconds"
-          }
-          if ($install.ExitCode -ne 0) { throw "msiexec failed with exit code $($install.ExitCode)" }
-          $exe = Get-ChildItem -Path "$env:ProgramFiles\Voice Memory" -Filter *.exe -Recurse | Select-Object -First 1
-          if (-not $exe) { throw "Installed Voice Memory executable not found" }
-          $app = Start-Process -FilePath $exe.FullName -PassThru
-          $health = $null
-          for ($attempt = 0; $attempt -lt 30; $attempt++) {
-            if ($app.HasExited) { throw "Installed Voice Memory process exited during startup" }
-            try {
-              $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/health' -TimeoutSec 2
-              break
-            } catch { Start-Sleep -Seconds 1 }
-          }
-          if (-not $health -or $health.status -ne 'ok' -or $health.service -ne 'voice-memory') {
-            throw "Installed app did not start its bundled local API sidecar"
-          }
-          $profiles = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/profiles' -TimeoutSec 5
-          $profileMap = $profiles | ConvertTo-Json -Depth 10 -Compress | ConvertFrom-Json -AsHashtable
-          if ($profileMap.Count -ne 7) { throw "Expected seven processing profiles from installed sidecar, got $($profileMap.Count)" }
-          if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(15000)) {
-            Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
-            throw "Installed Voice Memory process did not close gracefully"
-          }
-          $sidecarStopped = $false
-          for ($attempt = 0; $attempt -lt 10; $attempt++) {
-            try {
-              Invoke-RestMethod -Uri 'http://127.0.0.1:8765/health' -TimeoutSec 1 | Out-Null
-              Start-Sleep -Seconds 1
-            } catch { $sidecarStopped = $true; break }
-          }
-          if (-not $sidecarStopped) { throw "Bundled local API sidecar remained running after the app closed" }
+        run: ./scripts/windows-install-smoke.ps1
+      - name: Upload Windows acceptance diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-acceptance-diagnostics
+          path: desktop/smoke-diagnostics/**
+          if-no-files-found: warn
       - name: Upload desktop bundles
         if: success()
         uses: actions/upload-artifact@v4
