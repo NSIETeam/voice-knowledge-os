@@ -21,8 +21,11 @@ def test_streamed_capture_sources_remain_separately_identifiable(tmp_path):
     content = b"shared sample bytes"
     microphone = ledger.import_stream(BytesIO(content), len(content), "mic.wav", source_path="microphone-capture")
     system = ledger.import_stream(BytesIO(content), len(content), "system.wav", source_path="system-audio-loopback")
+    imported = ledger.import_stream(BytesIO(content), len(content), "imported.wav", source_path="file-import")
 
-    assert microphone.id != system.id
+    assert len({microphone.id, system.id, imported.id}) == 3
     assert microphone.stored_path == system.stored_path
+    assert system.stored_path == imported.stored_path
     assert microphone.source_path == "microphone-capture"
     assert system.source_path == "system-audio-loopback"
+    assert imported.source_path == "file-import"

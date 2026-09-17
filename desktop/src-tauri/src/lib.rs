@@ -17,5 +17,7 @@ pub fn run() {
         .expect("error while running Voice Memory desktop application");
 }
 
+mod audio_wav;
+
 #[cfg(target_os = "windows")]
 mod windows_audio;

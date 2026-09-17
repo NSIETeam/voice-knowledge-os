@@ -107,7 +107,7 @@ class AudioLedger:
         sensitivity: str = "private",
         source_path: str = "loopback-upload",
     ) -> AudioAsset:
-        """Stream a loopback upload to disk without buffering the recording in memory."""
+        """Stream a locally sourced audio asset without buffering it in memory."""
         if source_path not in {"loopback-upload", "file-import", "microphone-capture", "system-audio-loopback"}:
             raise ValueError("unsupported audio source")
         if content_length <= 0:

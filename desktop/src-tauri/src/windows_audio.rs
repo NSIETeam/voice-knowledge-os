@@ -1,6 +1,7 @@
+use crate::audio_wav::{write_float_stereo_wav_header, CHANNELS, SAMPLE_RATE};
 use std::collections::VecDeque;
 use std::fs::{self, File};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,9 +16,6 @@ use wasapi::{
 };
 
 const API_HOST: &str = "127.0.0.1:8765";
-const SAMPLE_RATE: u32 = 48_000;
-const CHANNELS: u16 = 2;
-const BYTES_PER_SAMPLE: u16 = 4;
 
 struct ActiveCapture {
     stop: Arc<AtomicBool>,
@@ -168,7 +166,8 @@ fn capture_loopback(
             .map_err(|error| format!("无法读取系统音频缓冲：{error}"))?;
         let mut file =
             File::create(output).map_err(|error| format!("无法创建系统音频文件：{error}"))?;
-        write_wav_header(&mut file, 0).map_err(|error| format!("无法初始化 WAV 文件：{error}"))?;
+        write_float_stereo_wav_header(&mut file, 0)
+            .map_err(|error| format!("无法初始化 WAV 文件：{error}"))?;
         client
             .start_stream()
             .map_err(|error| format!("系统音频录制启动失败：{error}"))?;
@@ -210,7 +209,7 @@ fn capture_loopback(
     let stop_result = client
         .stop_stream()
         .map_err(|error| format!("停止 WASAPI 音频流失败：{error}"));
-    let header_result = write_wav_header(&mut file, data_bytes)
+    let header_result = write_float_stereo_wav_header(&mut file, data_bytes)
         .map_err(|error| format!("完成 WAV 文件头失败：{error}"));
     file.flush()
         .map_err(|error| format!("刷新系统音频文件失败：{error}"))?;
@@ -218,26 +217,6 @@ fn capture_loopback(
     stop_result?;
     header_result?;
     Ok(output.to_path_buf())
-}
-
-fn write_wav_header(file: &mut File, data_bytes: u32) -> std::io::Result<()> {
-    let block_align = CHANNELS * BYTES_PER_SAMPLE;
-    let byte_rate = SAMPLE_RATE * u32::from(block_align);
-    file.seek(SeekFrom::Start(0))?;
-    file.write_all(b"RIFF")?;
-    file.write_all(&(36u32 + data_bytes).to_le_bytes())?;
-    file.write_all(b"WAVEfmt ")?;
-    file.write_all(&16u32.to_le_bytes())?;
-    file.write_all(&3u16.to_le_bytes())?; // IEEE float PCM
-    file.write_all(&CHANNELS.to_le_bytes())?;
-    file.write_all(&SAMPLE_RATE.to_le_bytes())?;
-    file.write_all(&byte_rate.to_le_bytes())?;
-    file.write_all(&block_align.to_le_bytes())?;
-    file.write_all(&(BYTES_PER_SAMPLE * 8).to_le_bytes())?;
-    file.write_all(b"data")?;
-    file.write_all(&data_bytes.to_le_bytes())?;
-    file.seek(SeekFrom::End(0))?;
-    Ok(())
 }
 
 fn upload_capture(path: &Path) -> Result<serde_json::Value, String> {
@@ -282,40 +261,4 @@ fn upload_capture(path: &Path) -> Result<serde_json::Value, String> {
         )
     })?;
     Ok(asset)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wav_header_matches_float_capture_payload() {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("voice-memory-wav-{stamp}.tmp"));
-        let mut file = File::create(&path).unwrap();
-        file.write_all(&[1, 2, 3, 4]).unwrap();
-        write_wav_header(&mut file, 4).unwrap();
-        file.seek(SeekFrom::Start(0)).unwrap();
-        let mut header = [0u8; 44];
-        file.read_exact(&mut header).unwrap();
-        assert_eq!(&header[0..4], b"RIFF");
-        assert_eq!(u32::from_le_bytes(header[4..8].try_into().unwrap()), 40);
-        assert_eq!(&header[8..16], b"WAVEfmt ");
-        assert_eq!(u16::from_le_bytes(header[20..22].try_into().unwrap()), 3);
-        assert_eq!(
-            u16::from_le_bytes(header[22..24].try_into().unwrap()),
-            CHANNELS
-        );
-        assert_eq!(
-            u32::from_le_bytes(header[24..28].try_into().unwrap()),
-            SAMPLE_RATE
-        );
-        assert_eq!(&header[36..40], b"data");
-        assert_eq!(u32::from_le_bytes(header[40..44].try_into().unwrap()), 4);
-        drop(file);
-        fs::remove_file(path).unwrap();
-    }
 }

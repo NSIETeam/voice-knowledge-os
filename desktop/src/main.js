@@ -91,7 +91,7 @@ assetImportButton.addEventListener('click', async () => {
   const file = document.querySelector('#audioFile').files?.[0];
   if (!file) return;
   assetImportButton.disabled = true;
-  try { await uploadAudio(file, file.name); processStatus.textContent = '音频已导入，配置转写后即可生成记录'; }
+  try { await uploadAudio(file, file.name, 'file-import'); processStatus.textContent = '音频已导入，配置转写后即可生成记录'; }
   catch (error) { assetStatus.textContent = `导入失败：${error.message}`; }
   finally { assetImportButton.disabled = false; }
 });
