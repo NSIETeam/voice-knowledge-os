@@ -84,7 +84,7 @@
                   <span class="panel-tag">每次修改都有记录</span>
                 </div>
                 <p class="review-intro">按记录 ID 打开已有转写，修正说话人或原文。模型建议始终可以回溯到对应音频片段。</p>
-                <div class="review-toolbar"><label for="reviewRecordId" class="sr-only">记录 ID</label><input id="reviewRecordId" class="text-input" placeholder="粘贴记录 ID" autocomplete="off" /><button id="loadReview" class="button button-outline" type="button">加载记录</button><button id="saveReview" class="button button-primary" type="button" disabled>保存修改</button></div>
+                <div class="review-toolbar"><label for="reviewRecordId" class="sr-only">记录 ID</label><input id="reviewRecordId" class="text-input" placeholder="粘贴记录 ID" autocomplete="off" /><button id="loadReview" class="button button-outline" type="button">加载记录</button><button id="saveReview" class="button button-primary" type="button" disabled>保存修改</button><button id="reanalyze" class="button button-outline" type="button" disabled>用本机模型重新整理</button></div>
                 <p id="reviewStatus" class="asset-status" aria-live="polite">未加载记录</p>
                 <audio id="reviewAudio" controls preload="metadata"></audio><div id="reviewSegments" class="review-segments"></div>
               </section>
