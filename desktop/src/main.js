@@ -21,6 +21,7 @@ const profileSelect = document.querySelector('#profile');
 const profileSummary = document.querySelector('#profileSummary');
 let nodeProcess;
 let nodeStartPromise;
+let nodeStartupFailure = null;
 let appIsClosing = false;
 let closeCleanupStarted = false;
 const apiUrl = 'http://127.0.0.1:8765';
@@ -191,15 +192,18 @@ async function startNode() {
     command.on('close', (event) => {
       nodeProcess = null;
       if (!appIsClosing) {
+        nodeStartupFailure = `退出代码 ${event.code ?? '未知'}`;
         status.className = 'warn';
-        status.textContent = `本地处理节点已退出（代码 ${event.code ?? '未知'}），可点击重新检查启动`;
+        status.textContent = `本地处理节点已退出（${nodeStartupFailure}），可点击重新检查启动`;
       }
     });
     command.on('error', (error) => {
+      nodeStartupFailure = String(error);
       status.className = 'warn';
       status.textContent = `本地处理节点启动失败：${error}`;
     });
     nodeProcess = await command.spawn();
+    nodeStartupFailure = null;
     if (navigator.userAgent.includes('Mac')) await invoke('register_sidecar_pid', {pid: nodeProcess.pid});
     return nodeProcess;
   })();
@@ -207,6 +211,7 @@ async function startNode() {
     return await nodeStartPromise;
   } catch (error) {
     nodeProcess = null;
+    nodeStartupFailure = error instanceof Error ? error.message : String(error);
     console.info('sidecar unavailable in browser/dev mode', error);
     throw error;
   } finally {
@@ -289,7 +294,9 @@ async function check() {
     return true;
   } catch (error) {
     status.className = 'warn';
-    status.textContent = isTauri()
+    status.textContent = nodeStartupFailure
+      ? `本地处理节点启动失败：${nodeStartupFailure}`
+      : isTauri()
       ? '本地处理节点尚未就绪，请点击“重新检查”重试'
       : '本地处理节点未启动，请先运行 voice-memory serve';
     return false;
@@ -311,6 +318,8 @@ document.querySelector('#retry').addEventListener('click', async () => {
 });
 let recorder;
 let chunks = [];
+const nativeMacMicrophone = isTauri() && navigator.userAgent.includes('Mac');
+let nativeMicRecording = false;
 let systemAudioRecording = false;
 if (!navigator.userAgent.includes('Windows')) {
   systemAudioButton.hidden = true;
@@ -347,6 +356,36 @@ systemAudioButton.addEventListener('click', async () => {
 
 document.querySelector('#record').addEventListener('click', async (event) => {
   const button = event.currentTarget;
+  if (nativeMacMicrophone) {
+    button.disabled = true;
+    try {
+      if (!nativeMicRecording) {
+        const recoveryPath = await invoke('start_microphone_capture');
+        nativeMicRecording = true;
+        recordLabel.textContent = '停止并保存录音';
+        recordStatus.textContent = `正在本机录音。临时文件可在应用异常退出后恢复：${recoveryPath}`;
+        return;
+      }
+      const asset = await invoke('stop_microphone_capture');
+      nativeMicRecording = false;
+      if (currentAsset?.id !== asset.id) lastCompletedJob = null;
+      currentAsset = asset;
+      assetStatus.textContent = `已保存麦克风录音：${asset.original_name} · ${asset.size_bytes} bytes · SHA-256 ${asset.sha256.slice(0, 12)}…`;
+      recordStatus.textContent = '录音已写入本地音频账本';
+      recordLabel.textContent = '开始麦克风录音';
+      if (!document.querySelector('#recordTitle').value) document.querySelector('#recordTitle').value = `录音 ${localTimestamp()}`;
+      refreshActions();
+    } catch (error) {
+      if (nativeMicRecording) {
+        nativeMicRecording = false;
+        recordLabel.textContent = '开始麦克风录音';
+      }
+      recordStatus.textContent = `麦克风录音失败：${error.message || error}`;
+    } finally {
+      button.disabled = false;
+    }
+    return;
+  }
   if (recorder?.state === 'recording') { recorder.stop(); recordLabel.textContent = '开始麦克风录音'; return; }
   try {
       const stream = await navigator.mediaDevices.getUserMedia({audio: true});

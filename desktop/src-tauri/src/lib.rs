@@ -20,14 +20,18 @@ pub fn run() {
         ]);
 
     #[cfg(target_os = "macos")]
-    let builder = builder.invoke_handler(tauri::generate_handler![
-        approve_app_exit,
-        mark_ui_ready,
-        terminate_sidecar_tree,
-        register_sidecar_pid,
-        clear_sidecar_pid,
-        desktop_process_id,
-    ]);
+    let builder = builder
+        .manage(macos_audio::MicrophoneCaptureState::default())
+        .invoke_handler(tauri::generate_handler![
+            macos_audio::start_microphone_capture,
+            macos_audio::stop_microphone_capture,
+            approve_app_exit,
+            mark_ui_ready,
+            terminate_sidecar_tree,
+            register_sidecar_pid,
+            clear_sidecar_pid,
+            desktop_process_id,
+        ]);
 
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -206,7 +210,11 @@ fn terminate_sidecar_tree(root_pid: u32) -> Result<(), String> {
     Ok(())
 }
 
+mod audio_upload;
 mod audio_wav;
+
+#[cfg(target_os = "macos")]
+mod macos_audio;
 
 #[cfg(target_os = "windows")]
 mod windows_audio;

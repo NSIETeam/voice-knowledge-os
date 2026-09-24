@@ -99,7 +99,10 @@ def capture_startup_state(diagnostics: Path, app: subprocess.Popen[bytes]) -> di
 
 
 def main() -> int:
-    diagnostics = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / f"voice-memory-{TARGET}-smoke"
+    # Tauri's sidecar resolver rejects an executable path traversing a symlink
+    # on macOS. `/tmp` commonly aliases `/private/tmp`, so canonicalize the
+    # complete smoke root before launching the copied app from its isolated HOME.
+    diagnostics = (Path(os.environ.get("RUNNER_TEMP", "/tmp")) / f"voice-memory-{TARGET}-smoke").resolve()
     home = diagnostics / "home"
     diagnostics.mkdir(parents=True, exist_ok=True)
     home.mkdir(parents=True, exist_ok=True)
@@ -126,6 +129,13 @@ def main() -> int:
     executable = app_path / "Contents" / "MacOS" / "voice-memory-desktop"
     if not executable.is_file():
         raise FileNotFoundError(f"packaged application is missing: {executable}")
+    permission = subprocess.run(
+        ["/usr/libexec/PlistBuddy", "-c", "Print :NSMicrophoneUsageDescription", str(app_path / "Contents" / "Info.plist")],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    if not permission:
+        raise RuntimeError("packaged application has an empty microphone usage description")
+    print("PASS: installed app declares its microphone permission purpose", flush=True)
     if listener_pids():
         raise RuntimeError("runner already has a listener on port 8765")
 
@@ -190,7 +200,7 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as error:
-        diagnostics = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / f"voice-memory-{TARGET}-smoke"
+        diagnostics = (Path(os.environ.get("RUNNER_TEMP", "/tmp")) / f"voice-memory-{TARGET}-smoke").resolve()
         diagnostics.mkdir(parents=True, exist_ok=True)
         (diagnostics / "failure.txt").write_text(f"{type(error).__name__}: {error}\n")
         for name, command in (
