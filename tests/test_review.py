@@ -135,6 +135,41 @@ def test_boolean_flags_reject_string_values(tmp_path):
         })
 
 
+def test_multiple_speakers_are_persisted_rendered_and_auditable(tmp_path):
+    import pytest
+
+    vault = tmp_path / "vault"
+    record = demo_record()
+    write_compiled(record, vault)
+    root = vault / ".voice-memory"
+
+    changed = apply_correction(root, record.id, {
+        "type": "set_speakers", "segment_id": "seg-0001",
+        "speaker_ids": ["speaker-1", "speaker-2", "speaker-1"],
+    })
+    segment = changed["record"]["segments"][0]
+    assert segment["speaker_ids"] == ["speaker-1", "speaker-2"]
+    assert segment["speaker"] == "speaker-1"
+    assert segment["overlap"] is True
+    assert "speaker-1 + speaker-2" in (vault / "Recordings" / f"{record.title}.md").read_text(encoding="utf-8")
+
+    restored = apply_correction(root, record.id, {"type": "undo"})
+    assert restored["record"]["segments"][0]["speaker_ids"] == ["Speaker 1"]
+    replayed = apply_correction(root, record.id, {"type": "redo"})
+    assert replayed["record"]["segments"][0]["speaker_ids"] == ["speaker-1", "speaker-2"]
+
+    with pytest.raises(ValueError, match="must remain marked as overlapping"):
+        apply_correction(root, record.id, {
+            "type": "mark_overlap", "segment_id": "seg-0001", "value": False,
+        })
+
+    with pytest.raises(ValueError, match="at most eight"):
+        apply_correction(root, record.id, {
+            "type": "set_speakers", "segment_id": "seg-0001",
+            "speaker_ids": [f"speaker-{index}" for index in range(9)],
+        })
+
+
 def test_source_transcript_snapshot_is_immutable_across_recompile(tmp_path):
     vault = tmp_path / "vault"
     record = demo_record()

@@ -48,6 +48,7 @@ The ZIP digests above are the GitHub Actions artifact digests for run `359466328
 - The local service binds to loopback, rejects untrusted browser origins, and restricts record/job identifiers and note titles to safe cross-platform path components.
 - Imported audio stays in the content-addressed ledger. Transcript source snapshots remain separate from reviewed records; edits are recorded as correction events.
 - Review Studio supports audio-linked segment playback, 0.01-second timing edits, split/merge, speaker/status and overlap/unclear corrections, and auditable undo/redo.
+- Review Studio and the sidecar now carry an auditable `speaker_ids` list per segment, retain legacy single-speaker labels, render overlapping multi-speaker segments, and treat multi-speaker assignment as an overlap. This is a human-review data contract only; no diarization model is bundled or claimed.
 - Apple Silicon desktop microphone capture uses native CoreAudio; Windows system playback capture uses WASAPI loopback. Both preserve a separate audio asset and provenance in the local ledger.
 - Recompilation changes only managed Markdown blocks, preserves user-authored sections, and writes rollback snapshots and diffs.
 - Semantic output must cite existing transcript segment IDs and remains visibly marked as a local, unreviewed suggestion.

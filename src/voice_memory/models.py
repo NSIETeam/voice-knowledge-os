@@ -50,6 +50,12 @@ class Segment:
     unclear: bool = False
     speaker_status: str = "unknown"
     source: str = "transcript"
+    speaker_ids: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Keep records written before multi-speaker support readable and explicit.
+        if not self.speaker_ids and self.speaker and self.speaker.casefold() != "unknown":
+            self.speaker_ids = [self.speaker]
 
     def evidence(self, recording_title: str) -> str:
         stamp = f"{int(self.start // 60):02d}:{int(self.start % 60):02d}"

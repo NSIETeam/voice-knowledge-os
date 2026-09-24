@@ -632,18 +632,25 @@ function renderReview(record) {
     const speaker = document.createElement('input');
     speaker.value = segment.speaker;
     speaker.setAttribute('aria-label', '说话人');
+    const speakerIds = document.createElement('input');
+    speakerIds.value = (segment.speaker_ids || (segment.speaker && segment.speaker !== 'Unknown' ? [segment.speaker] : [])).join(', ');
+    speakerIds.placeholder = '例如 speaker-1, speaker-2';
+    speakerIds.setAttribute('aria-label', '参与此片段的说话人 ID，逗号分隔');
     const state = document.createElement('select');
     for (const value of ['unknown', 'suggestion', 'confirmed']) {
       const option = document.createElement('option'); option.value = value; option.textContent = value === 'confirmed' ? '已确认' : value === 'suggestion' ? '建议' : '未知';
       if (value === (segment.speaker_status || 'unknown')) option.selected = true;
       state.append(option);
     }
-    meta.append(speaker, state);
+    meta.append(speaker, state, speakerIds);
     const text = document.createElement('textarea');
     text.value = segment.text;
     text.setAttribute('aria-label', '转写文本');
     const flags = document.createElement('label');
     const overlap = document.createElement('input'); overlap.type = 'checkbox'; overlap.checked = Boolean(segment.overlap); overlap.style.width = 'auto';
+    speakerIds.addEventListener('input', () => {
+      if (speakerIds.value.split(',').filter(value => value.trim()).length > 1) overlap.checked = true;
+    });
     const overlapText = document.createTextNode(' 重叠发言 ');
     const unclear = document.createElement('input'); unclear.type = 'checkbox'; unclear.checked = Boolean(segment.unclear); unclear.style.width = 'auto';
     flags.append(overlap, overlapText, unclear, document.createTextNode(' 不清楚'));
@@ -773,6 +780,7 @@ function hasPendingReviewEdits({ignoreText = false} = {}) {
     const flags = article.querySelectorAll('.review-flags input[type="checkbox"]');
     return (!ignoreText && article.querySelector('textarea').value.trim() !== original.text)
       || article.querySelector('input[aria-label="说话人"]').value.trim() !== original.speaker
+      || article.querySelector('[aria-label="参与此片段的说话人 ID，逗号分隔"]').value.trim() !== (original.speaker_ids || (original.speaker && original.speaker !== 'Unknown' ? [original.speaker] : [])).join(', ')
       || article.querySelector('select').value !== (original.speaker_status || 'unknown')
       || article.querySelector('[aria-label="片段开始时间（秒）"]').value !== article.querySelector('[aria-label="片段开始时间（秒）"]').dataset.initialValue
       || article.querySelector('[aria-label="片段结束时间（秒）"]').value !== article.querySelector('[aria-label="片段结束时间（秒）"]').dataset.initialValue
@@ -966,9 +974,10 @@ saveReview.addEventListener('click', async () => {
       const original = reviewRecord.segments.find(item => item.id === article.dataset.segmentId);
       const text = article.querySelector('textarea').value.trim();
       const speaker = article.querySelector('input[aria-label="说话人"]').value.trim();
+      const speakerIds = article.querySelector('[aria-label="参与此片段的说话人 ID，逗号分隔"]').value.split(',').map(value => value.trim()).filter(Boolean);
       const state = article.querySelector('select').value;
       const reviewFlags = article.querySelectorAll('.review-flags input[type="checkbox"]');
-      const overlap = reviewFlags[0].checked;
+      const overlap = reviewFlags[0].checked || speakerIds.length > 1;
       const unclear = reviewFlags[1].checked;
       const start = Number(article.querySelector('[aria-label="片段开始时间（秒）"]').value);
       const end = Number(article.querySelector('[aria-label="片段结束时间（秒）"]').value);
@@ -983,6 +992,8 @@ saveReview.addEventListener('click', async () => {
         await send({type:'edit_timing', segment_id:original.id, start, end});
       }
       if (speaker !== original.speaker || state !== (original.speaker_status || 'unknown')) await send({type:'relabel', segment_id:original.id, speaker, speaker_status:state});
+      const originalSpeakerIds = original.speaker_ids || (original.speaker && original.speaker !== 'Unknown' ? [original.speaker] : []);
+      if (JSON.stringify(speakerIds) !== JSON.stringify(originalSpeakerIds)) await send({type:'set_speakers', segment_id:original.id, speaker_ids:speakerIds});
       if (overlap !== Boolean(original.overlap)) await send({type:'mark_overlap', segment_id:original.id, value:overlap});
       if (unclear !== Boolean(original.unclear)) await send({type:'mark_unclear', segment_id:original.id, value:unclear});
     }

@@ -13,7 +13,7 @@ from .models import ConversationRecord, Segment
 
 
 VALID_OPERATIONS = {
-    "edit_text", "edit_timing", "relabel", "mark_overlap", "mark_unclear",
+    "edit_text", "edit_timing", "relabel", "set_speakers", "mark_overlap", "mark_unclear",
     "split", "merge", "undo", "redo",
 }
 VALID_SPEAKER_STATUS = {"confirmed", "suggestion", "unknown"}
@@ -136,10 +136,30 @@ def _apply_change(
             raise ValueError(f"unsupported speaker status: {status}")
         original.speaker = speaker.strip()
         original.speaker_status = status
+        original.speaker_ids = [speaker.strip()]
+    elif name == "set_speakers":
+        speakers = operation.get("speaker_ids")
+        if not isinstance(speakers, list) or len(speakers) > 8:
+            raise ValueError("speaker_ids must be a list containing at most eight speaker IDs")
+        normalized = []
+        for value in speakers:
+            if not isinstance(value, str) or not value.strip() or len(value.strip()) > 64:
+                raise ValueError("speaker IDs must be non-empty strings of at most 64 characters")
+            value = value.strip()
+            if value not in normalized:
+                normalized.append(value)
+        original.speaker_ids = normalized
+        original.speaker = normalized[0] if normalized else "Unknown"
+        if len(normalized) > 1:
+            original.overlap = True
+        elif not normalized:
+            original.speaker_status = "unknown"
     elif name == "mark_overlap":
         value = operation.get("value", True)
         if not isinstance(value, bool):
             raise ValueError("overlap value must be a boolean")
+        if not value and len(original.speaker_ids) > 1:
+            raise ValueError("a segment assigned to multiple speakers must remain marked as overlapping")
         original.overlap = value
     elif name == "mark_unclear":
         value = operation.get("value", True)

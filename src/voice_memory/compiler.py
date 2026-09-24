@@ -107,6 +107,7 @@ def write_source_transcript_snapshot(record: ConversationRecord, vault: str | Pa
                 "start": segment.start,
                 "end": segment.end,
                 "speaker": segment.speaker,
+                "speaker_ids": segment.speaker_ids,
                 "text": segment.text,
                 "confidence": segment.confidence,
                 "overlap": segment.overlap,
@@ -191,7 +192,7 @@ def compile_record(
     people = "\n".join(f"  - {person}" for person in record.people) or "  - 未确认"
     segment_lines = []
     for segment in record.segments:
-        identity = segment.speaker
+        identity = " + ".join(segment.speaker_ids) if segment.speaker_ids else segment.speaker
         speaker_state = {"confirmed": "已确认", "suggestion": "建议", "unknown": "未知"}.get(segment.speaker_status, "未知")
         certainty = f" · 置信度 {segment.confidence:.0%}" if segment.confidence is not None else ""
         flags = " · 重叠发言" if segment.overlap else ""
