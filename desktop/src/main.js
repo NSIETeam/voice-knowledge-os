@@ -41,8 +41,16 @@ profileSelect.addEventListener('change', () => {
 document.querySelector('#todayDate').textContent = new Intl.DateTimeFormat('zh-CN', {dateStyle:'medium'}).format(new Date()).toUpperCase();
 
 function refreshActions() {
-  const ready = Boolean(currentAsset && document.querySelector('#vaultPath').value.trim() && document.querySelector('#whisperPath').value.trim() && document.querySelector('#modelPath').value.trim());
+  const missing = [];
+  if (!currentAsset) missing.push('先录音或导入音频');
+  else {
+    if (!document.querySelector('#vaultPath').value.trim()) missing.push('选择 Obsidian Vault');
+    if (!document.querySelector('#whisperPath').value.trim()) missing.push('选择 whisper.cpp 程序');
+    if (!document.querySelector('#modelPath').value.trim()) missing.push('选择 Whisper 模型');
+  }
+  const ready = missing.length === 0;
   transcribeButton.disabled = !ready;
+  if (!ready) processStatus.textContent = `还需：${missing.join(' · ')}`;
 }
 
 function localTimestamp() {
@@ -281,7 +289,9 @@ async function check() {
     return true;
   } catch (error) {
     status.className = 'warn';
-    status.textContent = '本地处理节点未启动，请先运行 voice-memory serve';
+    status.textContent = isTauri()
+      ? '本地处理节点尚未就绪，请点击“重新检查”重试'
+      : '本地处理节点未启动，请先运行 voice-memory serve';
     return false;
   } finally {
     clearTimeout(timeout);
