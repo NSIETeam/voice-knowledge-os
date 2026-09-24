@@ -2,7 +2,11 @@
 
 ## Current product candidate
 
-The desktop baseline passed in run #57; subsequent product changes are recorded below and must pass their own CI and packaged acceptance before release.
+The desktop baseline passed in run #57; the optional local diarization adapter at commit `545c7acaaf3a70211a9f2a57bfbf56c9b651b178` has now passed its own platform workflows. Every later code change still requires its own CI and packaged acceptance before release.
+
+- Desktop shell run [#59 / 35965047526](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35965047526) passed for that exact commit on Windows x64 and Apple Silicon macOS. Windows completed the WASAPI adapter/Rust target tests and MSI install/start smoke test; macOS completed its Apple Silicon app build and DMG install/start smoke test.
+- CI run [#91 / 35965047519](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35965047519) passed for the same commit, including the OS/Python smoke matrix and Obsidian-plugin validation jobs.
+- The Windows/macOS jobs verify package build, installation, and startup only. They do not verify physical audio devices, inference quality, or public-release signing.
 
 - Desktop shell run [#57 / 35961507456](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35961507456) passed on Windows x64 and Apple Silicon macOS, including packaged install/start/lifecycle checks.
 - CI run [#87 / 35962230804](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35962230804) passed all nine OS/Python matrix jobs after making the preview-diff fixture explicitly CRLF and comparing exact newline bytes.
@@ -10,7 +14,7 @@ The desktop baseline passed in run #57; subsequent product changes are recorded 
 - CI run [#88 / 35963002789](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35963002789) passed all 11 jobs (two Obsidian-plugin matrix jobs and nine OS/Python smoke jobs) after setting `fail-fast: false`, so Windows failures no longer cancel remaining platform/version evidence.
 - These baseline results do not cover real microphone/device recording, real model inference, diarization accuracy, identity profiles, or signed public release; see the remaining release gates below.
 
-The current working tree adds optional NeMo-Speech.cpp diarization after the existing Whisper transcript. It uses a user-selected local model, normalizes non-WAV source media in a temporary directory, parses RTTM with validation, aligns only acoustic speaker clusters, and persists them as suggestions. Automated tests use a mocked local command; they do not establish real NeMo inference, quality, runtime install, or Windows/macOS model performance.
+Commit `545c7ac` adds optional NeMo-Speech.cpp diarization after the existing Whisper transcript. It uses a user-selected local model, normalizes non-WAV source media in a temporary directory, parses RTTM with validation, aligns only acoustic speaker clusters, and persists them as suggestions. Automated tests use a mocked local command; they do not establish real NeMo inference, quality, runtime install, or Windows/macOS model performance.
 
 Previous cross-platform acceptance covered product code `20ff6880d253f3c9330faba310a47952fc6589bd` on `codex/windows-wasapi-capture`.
 

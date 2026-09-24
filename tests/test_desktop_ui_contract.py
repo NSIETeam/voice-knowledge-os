@@ -25,6 +25,9 @@ def test_desktop_javascript_static_selectors_exist_in_html():
     assert 'fill="#1B3D32"' in brand_mark
     assert 'id="diarizationPath"' in html and 'id="diarizationModel"' in html
     assert "diarization_executable" in javascript and "diarization_model" in javascript
+    assert ".brand-mark" in styles and "#1b3d32" in styles.lower()
+    assert "@media (max-width: 860px)" in styles and "@media (max-width: 600px)" in styles
+    assert "@import" not in styles, "desktop UI must not fetch remote styles or fonts"
     assert "automatic model downloads are disabled" in (root / "src/voice_memory/transcription.py").read_text(encoding="utf-8")
     assert "参与此片段的说话人 ID，逗号分隔" in javascript
     assert "type:'set_speakers'" in javascript
