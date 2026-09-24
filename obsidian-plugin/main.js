@@ -101,15 +101,65 @@ class SpeakerNameModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
-class DiffModal extends Modal {
-  constructor(app, filePath, diff) { super(app); this.filePath = filePath; this.diff = diff; }
-  onOpen() {
-    this.titleEl.setText('重编译差异');
-    this.contentEl.createEl('p', { text: `${this.filePath} · 已由本机服务写入并保留回滚快照` });
-    const pre = this.contentEl.createEl('pre', { cls: 'vm-diff' });
-    pre.setText(this.diff || '本次内容与已保存版本相同。');
+class ReprocessApprovalModal extends Modal {
+  constructor(app, plugin, recordId, preview, onApproved) {
+    super(app);
+    this.plugin = plugin;
+    this.recordId = recordId;
+    this.preview = preview;
+    this.onApproved = onApproved;
+    this.finished = false;
   }
-  onClose() { this.contentEl.empty(); }
+  onOpen() {
+    this.titleEl.setText('写入前复核重编译差异');
+    this.contentEl.createEl('p', { text: '以下差异覆盖本次重新整理将影响的所有 Vault 笔记。批准之前不会修改笔记。' });
+    const list = this.contentEl.createDiv({ cls: 'vm-preview-files' });
+    for (const file of this.preview.files || []) {
+      const section = list.createDiv({ cls: 'vm-preview-file' });
+      section.createEl('h3', { text: file.path });
+      section.createEl('pre', { cls: 'vm-diff', text: file.diff || '内容无变化。' });
+    }
+    this.status = this.contentEl.createEl('p', { cls: 'vm-preview-status', text: `预览 ${this.preview.expires_in_seconds} 秒后失效。` });
+    const actions = this.contentEl.createDiv({ cls: 'vm-preview-actions' });
+    const cancel = actions.createEl('button', { text: '暂不写入' });
+    cancel.addEventListener('click', () => this.cancel());
+    this.approve = actions.createEl('button', { text: '确认写入这些更改' });
+    this.approve.addClass('mod-cta');
+    this.approve.addEventListener('click', () => this.approvePreview());
+  }
+  async approvePreview() {
+    this.approve.disabled = true;
+    this.status.setText('正在检查记录与笔记是否仍和预览一致…');
+    try {
+      const result = await this.plugin.request(`/records/${encodeURIComponent(this.recordId)}/reprocess/approve`, 'POST', {
+        preview_id: this.preview.preview_id,
+      });
+      this.finished = true;
+      this.close();
+      new Notice(`已批准写入 ${result.files.length} 个 Vault 笔记，并保留回滚快照`);
+      await this.onApproved(result);
+    } catch (error) {
+      this.status.setText(`尚未确认写入状态：${error.message}。可以再次确认以安全重试；若记录或笔记已变化，请关闭并重新生成预览。`);
+      this.approve.disabled = false;
+    }
+  }
+  async cancel() {
+    this.finished = true;
+    try {
+      await this.plugin.request(`/records/${encodeURIComponent(this.recordId)}/reprocess/cancel`, 'POST', {
+        preview_id: this.preview.preview_id,
+      });
+    } catch { /* expiration also discards the preview */ }
+    this.close();
+  }
+  onClose() {
+    if (!this.finished) {
+      this.plugin.request(`/records/${encodeURIComponent(this.recordId)}/reprocess/cancel`, 'POST', {
+        preview_id: this.preview.preview_id,
+      }).catch(() => {});
+    }
+    this.contentEl.empty();
+  }
 }
 
 class VoiceMemoryRecordModal extends Modal {
@@ -228,9 +278,9 @@ class VoiceMemoryRecordModal extends Modal {
         processor_endpoint: this.plugin.settings.processorEndpoint,
         processor_model: this.plugin.settings.processorModel,
       });
-      const diffText = `${result.diff || ''}${result.diff_truncated ? '\n\n[差异已截断；完整版本保存在 Vault 的 .voice-memory/diffs 中]' : ''}`;
-      new DiffModal(this.app, result.view_path || '', diffText).open();
-      await this.load();
+      new ReprocessApprovalModal(this.app, this.plugin, this.recordId, result, async () => {
+        await this.load();
+      }).open();
     } catch (error) {
       new Notice(`本机重编译失败：${error.message}`);
     } finally { button.disabled = false; }

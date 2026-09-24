@@ -4,22 +4,23 @@ import json
 from urllib.parse import unquote
 import base64
 import errno
+import hashlib
 import mimetypes
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
 from dataclasses import replace
-from datetime import datetime
-from difflib import unified_diff
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 from .ledger import AudioLedger
-from .compiler import write_compiled
+from .compiler import preview_compiled, write_compiled
 from .jobs import JobStore
 from .models import ConversationRecord, PROFILES, Segment, validate_record_title
 from .transcription import FixtureProvider, WhisperCppProvider
@@ -43,6 +44,18 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
     allowed_origins = {"http://tauri.localhost", "tauri://localhost", "http://127.0.0.1:8765", "http://localhost:8765", "app://obsidian.md"}
     allowed_headers = ("Content-Type", "X-File-Name", "X-Audio-Source")
     _index_lock = threading.Lock()
+    _record_write_lock = threading.RLock()
+    _pending_reprocess_lock = threading.Lock()
+    _pending_reprocess: dict[str, dict[str, Any]] = {}
+    _pending_reprocess_ttl = 600
+    _pending_reprocess_limit = 32
+
+    @classmethod
+    def _prune_pending_reprocess(cls) -> None:
+        now = time.monotonic()
+        expired = [key for key, value in cls._pending_reprocess.items() if value["expires_at"] <= now]
+        for key in expired:
+            cls._pending_reprocess.pop(key, None)
 
     def _record_sidecar(self, record_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", record_id):
@@ -216,6 +229,85 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if self._reject_untrusted_origin():
             return
+        if self.path.startswith("/records/") and self.path.endswith("/reprocess/cancel"):
+            if self.headers.get_content_type() != "application/json":
+                self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "content_type_must_be_application_json"})
+                return
+            record_id = unquote(self.path.removeprefix("/records/").removesuffix("/reprocess/cancel")).strip()
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length))
+                preview_id = payload.get("preview_id") if isinstance(payload, dict) else None
+                if not isinstance(preview_id, str):
+                    raise ValueError("preview_id is required")
+                already_approved = False
+                with self._pending_reprocess_lock:
+                    pending = self._pending_reprocess.get(preview_id)
+                    if pending and pending["record_id"] == record_id:
+                        already_approved = bool(pending.get("approved_result"))
+                        if not already_approved:
+                            self._pending_reprocess.pop(preview_id, None)
+                self._json(HTTPStatus.OK, {"cancelled": not already_approved, "already_approved": already_approved})
+            except (ValueError, json.JSONDecodeError) as error:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        if self.path.startswith("/records/") and self.path.endswith("/reprocess/approve"):
+            if self.headers.get_content_type() != "application/json":
+                self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "content_type_must_be_application_json"})
+                return
+            record_id = unquote(self.path.removeprefix("/records/").removesuffix("/reprocess/approve")).strip()
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict) or not isinstance(payload.get("preview_id"), str):
+                    raise ValueError("preview_id is required")
+                preview_id = payload["preview_id"]
+                with self._record_write_lock:
+                    with self._pending_reprocess_lock:
+                        self._prune_pending_reprocess()
+                        pending = self._pending_reprocess.get(preview_id)
+                        if not pending or pending["record_id"] != record_id:
+                            self._json(HTTPStatus.GONE, {"error": "preview_expired_or_not_found"})
+                            return
+                        if pending.get("approved_result"):
+                            self._json(HTTPStatus.OK, pending["approved_result"])
+                            return
+                        sidecar_path = self._record_sidecar(record_id)
+                        if hashlib.sha256(sidecar_path.read_bytes()).hexdigest() != pending["sidecar_sha256"]:
+                            self._json(HTTPStatus.CONFLICT, {"error": "record_changed_after_preview; create_a_new_preview"})
+                            return
+                        for note in pending["notes"]:
+                            path = Path(note["absolute_path"])
+                            if path.resolve() != path or not path.resolve().is_relative_to(Path(pending["vault"]).resolve()):
+                                self._json(HTTPStatus.CONFLICT, {"error": "vault_path_changed_after_preview; create_a_new_preview"})
+                                return
+                            current_hash = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+                            if current_hash != note["before_sha256"]:
+                                self._json(HTTPStatus.CONFLICT, {"error": "vault_note_changed_after_preview; create_a_new_preview"})
+                                return
+                        if not analysis_matches_transcript(pending["record"], pending["analysis"]):
+                            self._json(HTTPStatus.CONFLICT, {"error": "preview_analysis_no_longer_matches_record"})
+                            return
+                        destination = write_compiled(
+                            pending["record"], pending["vault"],
+                            correction_history=pending["correction_history"],
+                            analysis=pending["analysis"],
+                            compiled_at=pending["compiled_at"],
+                        )
+                        updated = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                        view_path = updated.get("analysis_view_paths", {}).get(pending["profile"])
+                        result = {
+                            "record": updated["record"],
+                            "analysis": updated.get("analysis_views", {}).get(pending["profile"]),
+                            "view_path": view_path or str(destination),
+                            "files": [note["relative_path"] for note in pending["notes"]],
+                        }
+                        pending["approved_result"] = result
+                        pending["expires_at"] = time.monotonic() + self._pending_reprocess_ttl
+                self._json(HTTPStatus.OK, result)
+            except (FileNotFoundError, KeyError, ValueError, TypeError, json.JSONDecodeError) as error:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if self.path.startswith("/records/") and self.path.endswith("/reprocess"):
             if self.headers.get_content_type() != "application/json":
                 self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "content_type_must_be_application_json"})
@@ -233,6 +325,8 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 data = dict(sidecar["record"])
                 record = ConversationRecord(**{key: value for key, value in data.items() if key != "segments"})
                 record.segments = [Segment(**segment) for segment in data.get("segments", [])]
+                vault = sidecar_path.parent.parent.parent
+                sidecar_sha256 = hashlib.sha256(sidecar_path.read_bytes()).hexdigest()
                 profile = payload.get("primary_mode", record.primary_mode)
                 if profile not in PROFILES:
                     raise ValueError("unknown processing profile")
@@ -241,38 +335,44 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                     payload.get("processor_endpoint", "http://127.0.0.1:11434"),
                     payload.get("processor_model", ""),
                 ).process(processing_record)
-                vault = sidecar_path.parent.parent.parent
-                if profile == record.primary_mode:
-                    validate_record_title(record.title)
-                    target_before = vault / "Recordings" / f"{record.title}.md"
-                else:
-                    target_before = vault / "Recordings" / "Views" / record.id / f"{profile}.md"
-                before_text = target_before.read_text(encoding="utf-8") if target_before.is_file() else ""
-                write_compiled(
-                    record,
-                    vault,
-                    correction_history=sidecar.get("correction_history", []),
-                    analysis=analysis,
-                )
-                updated = json.loads(sidecar_path.read_text(encoding="utf-8"))
-                view_path = updated.get("analysis_view_paths", {}).get(profile)
-                target_after = Path(view_path) if view_path else target_before
-                after_text = target_after.read_text(encoding="utf-8")
-                diff = "".join(unified_diff(
-                    before_text.splitlines(keepends=True),
-                    after_text.splitlines(keepends=True),
-                    fromfile=f"{target_after.name} (before)",
-                    tofile=f"{target_after.name} (after)",
-                ))
-                diff_truncated = len(diff) > 100_000
-                if diff_truncated:
-                    diff = diff[:100_000] + "\n…差异超过 100,000 字符，已截断；完整差异保存在 Vault 的 .voice-memory/diffs 中。\n"
+                compiled_at = datetime.now(timezone.utc).isoformat()
+                with self._record_write_lock:
+                    if hashlib.sha256(sidecar_path.read_bytes()).hexdigest() != sidecar_sha256:
+                        self._json(HTTPStatus.CONFLICT, {"error": "record_changed_during_preview; retry"})
+                        return
+                    notes = preview_compiled(record, vault, analysis, compiled_at)
+                    total_diff = sum(len((note["diff"] or "").encode("utf-8")) for note in notes)
+                    if total_diff > 1_000_000:
+                        self._json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "preview_exceeds_one_megabyte; narrow_the_record_before_reprocessing"})
+                        return
+                    pending_notes = [
+                        {**note, "absolute_path": note["path"], "relative_path": os.path.relpath(note["path"], vault)}
+                        for note in notes
+                    ]
+                    with self._pending_reprocess_lock:
+                        self._prune_pending_reprocess()
+                        if len(self._pending_reprocess) >= self._pending_reprocess_limit:
+                            self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "too_many_pending_previews; wait_for_expiry_or_approve_one"})
+                            return
+                        preview_id = secrets.token_urlsafe(32)
+                        self._pending_reprocess[preview_id] = {
+                            "record_id": record_id,
+                            "vault": vault,
+                            "record": record,
+                            "correction_history": sidecar.get("correction_history", []),
+                            "analysis": analysis,
+                            "profile": profile,
+                            "compiled_at": compiled_at,
+                            "sidecar_sha256": sidecar_sha256,
+                            "notes": pending_notes,
+                            "expires_at": time.monotonic() + self._pending_reprocess_ttl,
+                        }
                 self._json(HTTPStatus.OK, {
-                    "record": updated["record"],
-                    "analysis": updated.get("analysis_views", {}).get(profile),
-                    "view_path": view_path,
-                    "diff": diff,
-                    "diff_truncated": diff_truncated,
+                    "preview_id": preview_id,
+                    "profile": profile,
+                    "files": [{"path": note["relative_path"], "diff": note["diff"]} for note in pending_notes],
+                    "expires_in_seconds": self._pending_reprocess_ttl,
+                    "approval_required": True,
                 })
             except (FileNotFoundError, KeyError, ValueError, TypeError, json.JSONDecodeError) as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
@@ -286,7 +386,8 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             try:
                 payload = json.loads(self.rfile.read(length))
                 sidecar_path = self._record_sidecar(record_id)
-                result = apply_correction(sidecar_path.parent.parent, record_id, payload)
+                with self._record_write_lock:
+                    result = apply_correction(sidecar_path.parent.parent, record_id, payload)
                 self._json(HTTPStatus.OK, result)
             except (FileNotFoundError, KeyError, ValueError, json.JSONDecodeError) as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
@@ -404,9 +505,10 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
             record_data = payload["record"]
             record = ConversationRecord(**{key: value for key, value in record_data.items() if key != "segments"})
             record.segments = [Segment(**segment) for segment in record_data.get("segments", [])]
-            destination = write_compiled(record, payload["vault"])
-            sidecar = Path(payload["vault"]) / ".voice-memory" / "recordings" / f"{record.id}.json"
-            self._register_record(record.id, sidecar)
+            with self._record_write_lock:
+                destination = write_compiled(record, payload["vault"])
+                sidecar = Path(payload["vault"]) / ".voice-memory" / "recordings" / f"{record.id}.json"
+                self._register_record(record.id, sidecar)
             self._json(HTTPStatus.CREATED, {"path": str(destination), "sidecar_path": str(sidecar), "record_id": record.id})
         except FileExistsError as error:
             self._json(HTTPStatus.CONFLICT, {"error": str(error)})

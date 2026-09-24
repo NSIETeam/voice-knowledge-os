@@ -1,9 +1,10 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from voice_memory.cli import demo_record
-from voice_memory.compiler import compile_record, write_compiled
+from voice_memory.compiler import compile_record, preview_compiled, write_compiled
 from voice_memory.processing import transcript_fingerprint
 
 
@@ -119,6 +120,47 @@ def test_compiler_keeps_multiple_profile_views_without_changing_the_record(tmp_p
     write_compiled(record, vault)
     assert "本机模型整理建议（已过期）" in canonical.read_text(encoding="utf-8")
     assert "本机模型整理建议（已过期）" in (vault / "Recordings" / "Views" / record.id / "knowledge.md").read_text(encoding="utf-8")
+
+
+def test_recompile_preview_is_read_only_and_matches_approved_markdown(tmp_path):
+    from difflib import unified_diff
+
+    record = demo_record()
+    vault = tmp_path / "vault"
+    canonical = write_compiled(record, vault)
+    canonical.write_text(canonical.read_text(encoding="utf-8") + "\n## 我的补充\n保留这段内容。\n", encoding="utf-8")
+    sidecar_path = vault / ".voice-memory" / "recordings" / f"{record.id}.json"
+    original_sidecar = sidecar_path.read_bytes()
+    original_markdown = canonical.read_text(encoding="utf-8")
+    analysis = {
+        "schema_version": "voice-memory.analysis.v1",
+        "provider": "ollama-local",
+        "model": "fixture-model",
+        "profile": "knowledge",
+        "source_transcript_sha256": transcript_fingerprint(record),
+        "summary": {"text": "预览候选", "evidence_ids": ["seg-0001"]},
+        "findings": [{"kind": "claims", "text": "有来源的主张", "evidence_ids": ["seg-0001"]}],
+    }
+    compiled_at = "2026-09-24T08:00:00+00:00"
+
+    previews = preview_compiled(record, vault, analysis, compiled_at)
+
+    assert len(previews) == 2
+    assert sidecar_path.read_bytes() == original_sidecar
+    assert canonical.read_text(encoding="utf-8") == original_markdown
+    view_path = vault / "Recordings" / "Views" / record.id / "knowledge.md"
+    assert not view_path.exists()
+    write_compiled(record, vault, analysis=analysis, compiled_at=compiled_at)
+    for preview in previews:
+        path = Path(preview["path"])
+        before = original_markdown if path == canonical else ""
+        after = path.read_text(encoding="utf-8")
+        expected = "".join(unified_diff(
+            before.splitlines(keepends=True), after.splitlines(keepends=True),
+            fromfile=f"{path.name} (before)", tofile=f"{path.name} (after)",
+        ))
+        assert preview["diff"] == expected
+    assert "保留这段内容。" in canonical.read_text(encoding="utf-8")
 
 
 def test_write_compiled_creates_versioned_sidecar_and_rollback(tmp_path):

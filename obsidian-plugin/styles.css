@@ -13,4 +13,10 @@
 .vm-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--background-modifier-border); }
 .vm-footer select { flex: 1; min-width: 150px; }
 .vm-diff { max-height: 65vh; overflow: auto; padding: 12px; color: var(--text-normal); background: var(--background-secondary); white-space: pre-wrap; }
+.vm-preview-files { display: grid; gap: 12px; max-height: 60vh; overflow: auto; }
+.vm-preview-file { overflow: hidden; border: 1px solid var(--background-modifier-border); border-radius: 8px; }
+.vm-preview-file h3 { margin: 0; padding: 10px 12px; background: var(--background-secondary); font-size: 0.9em; overflow-wrap: anywhere; }
+.vm-preview-file .vm-diff { max-height: 38vh; margin: 0; padding: 12px; }
+.vm-preview-status { color: var(--text-muted); }
+.vm-preview-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .vm-error { color: var(--text-error); }

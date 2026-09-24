@@ -328,6 +328,17 @@ h1 { margin-bottom: 8px; font-size: clamp(30px, 3vw, 39px); letter-spacing: -.04
 .privacy-card strong { font-size: 12px; }
 .privacy-card p { font-size: 11px; line-height: 1.7; }
 .sidebar-version { font-size: 9px; }
+.reprocess-dialog { width: min(880px, calc(100vw - 32px)); max-width: 880px; max-height: min(84vh, 900px); padding: 28px; color: var(--ink); background: var(--paper); border: 1px solid #dfe3d8; border-radius: 16px; box-shadow: 0 24px 80px rgba(20,47,39,.24); }
+.reprocess-dialog::backdrop { background: rgba(18,35,29,.58); backdrop-filter: blur(3px); }
+.dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.dialog-heading h2 { margin: 0; color: var(--forest-deep); font-size: 22px; letter-spacing: -.03em; }
+.dialog-explainer { margin: 15px 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.reprocess-diffs { display: grid; gap: 12px; max-height: 52vh; overflow: auto; padding: 2px; }
+.reprocess-diff-file { min-width: 0; overflow: hidden; background: #f7f7f1; border: 1px solid var(--line); border-radius: 10px; }
+.reprocess-diff-file h3 { margin: 0; padding: 11px 14px; color: var(--forest); background: #edf0e7; font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
+.reprocess-diff-file pre { max-height: 300px; margin: 0; padding: 14px; overflow: auto; color: #3a4940; font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dialog-status { min-height: 20px; margin: 12px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 
 @media (max-width: 1120px) {
   .sidebar { width: 218px; }
@@ -370,6 +381,11 @@ h1 { margin-bottom: 8px; font-size: clamp(30px, 3vw, 39px); letter-spacing: -.04
   .transcribe-row { align-items: flex-end; }
   .secondary-column { grid-template-columns: 1fr; }
   .status-panel { grid-row: auto; }
+  .reprocess-dialog { padding: 19px 15px; }
+  .dialog-heading { align-items: flex-start; }
+  .dialog-heading h2 { font-size: 18px; }
+  .dialog-actions { flex-direction: column-reverse; }
+  .dialog-actions .button { width: 100%; }
 }
 
 @media (min-width: 1450px) {

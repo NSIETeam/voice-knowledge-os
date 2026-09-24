@@ -427,6 +427,11 @@ const reviewSelectionCount = document.querySelector('#reviewSelectionCount');
 const reviewAssertions = document.querySelector('#reviewAssertions');
 const reviewAssertionsHint = document.querySelector('#reviewAssertionsHint');
 const reviewAssertionsList = document.querySelector('#reviewAssertionsList');
+const reprocessDialog = document.querySelector('#reprocessDialog');
+const reprocessDiffs = document.querySelector('#reprocessDiffs');
+const reprocessDialogStatus = document.querySelector('#reprocessDialogStatus');
+const approveReprocess = document.querySelector('#approveReprocess');
+let pendingReprocessPreview = null;
 
 function syncReviewHistoryControls() {
   undoReview.disabled = !reviewHistory.some(item => (item.kind || 'change') === 'change' && item.active !== false);
@@ -744,6 +749,50 @@ document.querySelector('#ollamaModel').addEventListener('input', () => {
   reanalyzeButton.disabled = !reviewRecord || !document.querySelector('#ollamaModel').value.trim();
 });
 
+reprocessDialog.addEventListener('close', () => {
+  const previewId = pendingReprocessPreview;
+  pendingReprocessPreview = null;
+  if (!previewId || !reviewRecord) return;
+  fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}/reprocess/cancel`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({preview_id:previewId}),
+  }).catch(() => {});
+});
+document.querySelector('#cancelReprocess').addEventListener('click', () => reprocessDialog.close());
+
+approveReprocess.addEventListener('click', async () => {
+  if (!pendingReprocessPreview || !reviewRecord) return;
+  let approved = false;
+  approveReprocess.disabled = true;
+  document.querySelector('#cancelReprocess').disabled = true;
+  reprocessDialogStatus.textContent = '正在检查记录和 Vault 是否仍与预览时一致…';
+  try {
+    const response = await fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}/reprocess/approve`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({preview_id:pendingReprocessPreview}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    approved = true;
+    pendingReprocessPreview = null;
+    reprocessDialog.close();
+    const refreshed = await fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}`);
+    if (!refreshed.ok) throw new Error(`写入成功，但刷新记录失败：HTTP ${refreshed.status}`);
+    const sidecar = await refreshed.json();
+    reviewSidecar = sidecar;
+    reviewRecord = sidecar.record;
+    renderReview(reviewRecord);
+    reviewStatus.textContent = `已批准并写入 ${result.files.length} 个 Vault 笔记；回滚快照与差异已保留。`;
+  } catch (error) {
+    if (approved) {
+      reviewStatus.textContent = `更改已写入，但无法刷新记录：${error.message}。请重新加载记录确认当前状态。`;
+      return;
+    }
+    reprocessDialogStatus.textContent = `尚未确认写入状态：${error.message}。可以再次点“确认写入”安全重试；若记录或笔记已变化，请关闭预览后重新生成。`;
+    approveReprocess.disabled = false;
+    document.querySelector('#cancelReprocess').disabled = false;
+  }
+});
+
 reanalyzeButton.addEventListener('click', async () => {
   if (!reviewRecord) return;
   const selectedProfile = document.querySelector('#profile').value;
@@ -757,14 +806,24 @@ reanalyzeButton.addEventListener('click', async () => {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    const refreshed = await fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}`);
-    if (!refreshed.ok) throw new Error(`刷新记录失败：HTTP ${refreshed.status}`);
-    const sidecar = await refreshed.json();
-    reviewSidecar = sidecar;
-    reviewRecord = sidecar.record;
     document.querySelector('#profile').value = selectedProfile;
-    renderReview(reviewRecord);
-    reviewStatus.textContent = `已生成“${selectedProfileName}”处理视角：${result.view_path}；结果仍需逐条核验。`;
+    pendingReprocessPreview = result.preview_id;
+    reprocessDiffs.replaceChildren();
+    for (const file of result.files || []) {
+      const section = document.createElement('section');
+      section.className = 'reprocess-diff-file';
+      const heading = document.createElement('h3');
+      heading.textContent = file.path;
+      const pre = document.createElement('pre');
+      pre.textContent = file.diff || '内容无变化。';
+      section.append(heading, pre);
+      reprocessDiffs.append(section);
+    }
+    reprocessDialogStatus.textContent = `“${selectedProfileName}”预览已生成，尚未修改 Vault。预览将在 ${result.expires_in_seconds} 秒后失效。`;
+    approveReprocess.disabled = false;
+    document.querySelector('#cancelReprocess').disabled = false;
+    reprocessDialog.showModal();
+    reviewStatus.textContent = '重编译预览已生成；批准之前不会写入 Vault。';
   } catch (error) {
     reviewStatus.textContent = `重新整理失败：${error.message}`;
     reanalyzeButton.disabled = !reviewRecord || !document.querySelector('#ollamaModel').value.trim();

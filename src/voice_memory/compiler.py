@@ -185,6 +185,7 @@ def compile_record(
     analysis: dict | None = None,
     available_views: list[str] | None = None,
     canonical_profile: str | None = None,
+    compiled_at: str | None = None,
 ) -> str:
     profile = PROFILES.get(record.primary_mode, {"name": record.primary_mode, "extract": []})
     people = "\n".join(f"  - {person}" for person in record.people) or "  - 未确认"
@@ -280,7 +281,7 @@ def compile_record(
         _managed("transcript", "## 原始转写\n\n" + transcript),
         _managed(
             "processing",
-            "## 处理记录\n\n- 最近重编译：" + datetime.now(timezone.utc).isoformat()
+            "## 处理记录\n\n- 最近重编译：" + (compiled_at or datetime.now(timezone.utc).isoformat())
             + (f"\n- 本机语义处理：{analysis['provider']} / {analysis['model']}（{analysis.get('generated_at', '时间未知')}）" if analysis else "\n- 本机语义处理：未运行")
             + ("\n- 状态：原文、说话人或处理模式已变化；旧分析已标记过期。" if analysis and not analysis_current else ""),
         ),
@@ -288,11 +289,85 @@ def compile_record(
     ])
 
 
+def preview_compiled(
+    record: ConversationRecord,
+    vault: str | Path,
+    analysis: dict,
+    compiled_at: str,
+) -> list[dict[str, str | None]]:
+    """Render every Markdown file a recompile would change without writing anything."""
+    validate_record_id(record.id)
+    validate_record_title(record.title)
+    vault_path = Path(vault).expanduser().resolve()
+    sidecar_path = vault_path / ".voice-memory" / "recordings" / f"{record.id}.json"
+    try:
+        previous = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("record sidecar is unreadable; refusing to preview a recompile") from error
+    if previous.get("record_id") != record.id:
+        raise ValueError("record sidecar identity does not match")
+    analysis_views = dict(previous.get("analysis_views", {}))
+    legacy_analysis = previous.get("analysis")
+    if not analysis_views and isinstance(legacy_analysis, dict):
+        legacy_profile = legacy_analysis.get("profile") or previous.get("processing_profile")
+        if legacy_profile not in PROFILES:
+            raise ValueError("existing Voice Memory sidecar contains an invalid processing profile")
+        analysis_views[legacy_profile] = legacy_analysis
+    elif legacy_analysis is not None and not isinstance(legacy_analysis, dict):
+        raise ValueError("existing Voice Memory sidecar contains an invalid analysis")
+    for mode, view in analysis_views.items():
+        if mode not in PROFILES or not isinstance(view, dict) or view.get("profile") != mode:
+            raise ValueError("existing Voice Memory sidecar contains an invalid processing view")
+    profile = analysis.get("profile")
+    if profile not in PROFILES or analysis.get("source_transcript_sha256") != transcript_fingerprint(record):
+        raise ValueError("analysis does not match the current record")
+    analysis_views[profile] = analysis
+
+    targets = [(record.primary_mode, vault_path / "Recordings" / f"{record.title}.md")]
+    targets.extend(
+        (mode, vault_path / "Recordings" / "Views" / record.id / f"{mode}.md")
+        for mode in sorted(analysis_views)
+        if mode != record.primary_mode
+    )
+    previews: list[dict[str, str | None]] = []
+    for mode, target in targets:
+        resolved = target.resolve()
+        if resolved != target:
+            raise ValueError("recompile preview does not support symlinked Vault note paths")
+        if not resolved.is_relative_to(vault_path):
+            raise ValueError("compiled note path escapes the selected Vault")
+        if resolved.is_file():
+            with resolved.open("r", encoding="utf-8", newline="") as stream:
+                existing = stream.read()
+            before_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        else:
+            existing = ""
+            before_sha256 = None
+        view_record = replace(record, primary_mode=mode)
+        rendered = compile_record(
+            view_record,
+            analysis_views.get(mode),
+            sorted(analysis_views),
+            canonical_profile=record.primary_mode,
+            compiled_at=compiled_at,
+        )
+        final = _merge_managed(existing, rendered) if existing else rendered
+        diff = "".join(unified_diff(
+            existing.splitlines(keepends=True),
+            final.splitlines(keepends=True),
+            fromfile=f"{resolved.name} (before)",
+            tofile=f"{resolved.name} (after)",
+        ))
+        previews.append({"path": str(resolved), "before_sha256": before_sha256, "diff": diff})
+    return previews
+
+
 def write_compiled(
     record: ConversationRecord,
     vault: str | Path,
     correction_history: list[dict] | None = None,
     analysis: dict | None = None,
+    compiled_at: str | None = None,
 ) -> Path:
     validate_record_id(record.id)
     validate_record_title(record.title)
@@ -337,7 +412,7 @@ def write_compiled(
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         shutil.copyfile(destination, rollback_dir / f"{stamp}.md")
 
-    rendered = compile_record(record, primary_analysis, sorted(analysis_views), record.primary_mode)
+    rendered = compile_record(record, primary_analysis, sorted(analysis_views), record.primary_mode, compiled_at)
     final_markdown = _merge_managed(existing_markdown, rendered) if existing_markdown is not None else rendered
     if existing_markdown is not None:
         diff_dir = machine_root / "diffs" / record.id
@@ -363,6 +438,7 @@ def write_compiled(
             analysis_views[mode],
             sorted(analysis_views),
             canonical_profile=record.primary_mode,
+            compiled_at=compiled_at,
         )
         final_view = _merge_managed(existing_view, rendered_view) if existing_view is not None else rendered_view
         if existing_view is not None:

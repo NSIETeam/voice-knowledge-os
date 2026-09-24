@@ -320,11 +320,109 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(reprocess_request) as response:
+        try:
+            with urllib.request.urlopen(reprocess_request) as response:
+                preview = json.load(response)
+        except urllib.error.HTTPError as error:
+            pytest.fail(f"reprocess preview failed: {error.read().decode()}")
+        assert preview["approval_required"] is True
+        assert len(preview["files"]) == 2
+        assert "有证据支持的本机候选总结" in "".join(item["diff"] for item in preview["files"])
+        cancel_request = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess/cancel",
+            data=json.dumps({"preview_id": preview["preview_id"]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        json.load(urllib.request.urlopen(cancel_request))
+        cancelled_approval = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess/approve",
+            data=json.dumps({"preview_id": preview["preview_id"]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as cancelled:
+            urllib.request.urlopen(cancelled_approval)
+        assert cancelled.value.code == 410
+        reprocess_request = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess",
+            data=json.dumps({
+                "primary_mode": "decision", "processor_endpoint": "http://127.0.0.1:11434",
+                "processor_model": "fixture-model",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        preview = json.load(urllib.request.urlopen(reprocess_request))
+        semantic_sidecar = json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))
+        assert semantic_sidecar["record"]["primary_mode"] == "knowledge"
+        assert set(semantic_sidecar["analysis_views"]) == {"knowledge"}
+        assert len(semantic_sidecar["correction_history"]) == 1
+        refreshed_markdown = Path(semantic_record["path"]).read_text(encoding="utf-8")
+        assert "本机模型整理建议（已过期）" in refreshed_markdown
+
+        decision_path = Path(semantic_record["path"]).parent / "Views" / semantic_record["record_id"] / "decision.md"
+        decision_path.parent.mkdir(parents=True, exist_ok=True)
+        decision_path.write_text("# 用户在预览后补充的内容\n", encoding="utf-8")
+        approval_request = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess/approve",
+            data=json.dumps({"preview_id": preview["preview_id"]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as stale_note:
+            urllib.request.urlopen(approval_request)
+        assert stale_note.value.code == 409
+        assert set(json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))["analysis_views"]) == {"knowledge"}
+        decision_path.unlink()
+
+        stale_record_preview = json.load(urllib.request.urlopen(reprocess_request))
+        change_after_preview = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/corrections",
+            data=json.dumps({"type": "edit_text", "segment_id": "seg-1", "text": "预览之后再次校正"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(change_after_preview).close()
+        stale_record_approval = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess/approve",
+            data=json.dumps({"preview_id": stale_record_preview["preview_id"]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as stale_record_error:
+            urllib.request.urlopen(stale_record_approval)
+        assert stale_record_error.value.code == 409
+
+        reprocess_request = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess",
+            data=json.dumps({
+                "primary_mode": "decision", "processor_endpoint": "http://127.0.0.1:11434",
+                "processor_model": "fixture-model",
+            }).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        preview = json.load(urllib.request.urlopen(reprocess_request))
+        approval_request = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess/approve",
+            data=json.dumps({"preview_id": preview["preview_id"]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(approval_request) as response:
             reprocessed = json.load(response)
+        rollback_dir = Path(semantic_record["path"]).parent.parent / ".voice-memory" / "rollback" / semantic_record["record_id"]
+        rollback_count = len(list(rollback_dir.glob("*.md")))
+        retry_approval = urllib.request.Request(
+            f"{base}/records/{semantic_record['record_id']}/reprocess/approve",
+            data=json.dumps({"preview_id": preview["preview_id"]}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        assert json.load(urllib.request.urlopen(retry_approval)) == reprocessed
+        assert len(list(rollback_dir.glob("*.md"))) == rollback_count
         assert reprocessed["analysis"]["profile"] == "decision"
-        assert "有证据支持的本机候选总结" in reprocessed["diff"]
-        assert reprocessed["diff_truncated"] is False
         assert reprocessed["analysis"]["source_transcript_sha256"] == transcript_fingerprint(
             ConversationRecord(
                 **{key: value for key, value in reprocessed["record"].items() if key != "segments"},
@@ -334,9 +432,7 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
         semantic_sidecar = json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))
         assert semantic_sidecar["record"]["primary_mode"] == "knowledge"
         assert set(semantic_sidecar["analysis_views"]) == {"knowledge", "decision"}
-        assert len(semantic_sidecar["correction_history"]) == 1
-        refreshed_markdown = Path(semantic_record["path"]).read_text(encoding="utf-8")
-        assert "本机模型整理建议（已过期）" in refreshed_markdown
+        assert len(semantic_sidecar["correction_history"]) == 2
         decision_view = Path(reprocessed["view_path"]).read_text(encoding="utf-8")
         assert "本机模型整理建议（待审核）" in decision_view
         assert "有证据支持的本机候选总结" in decision_view

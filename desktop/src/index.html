@@ -96,6 +96,14 @@
                 <div id="reviewTimeline" class="review-timeline" hidden aria-label="录音片段时间线"><div id="reviewRuler" class="review-ruler"></div><div id="reviewTracks" class="review-tracks"></div></div>
                 <div id="reviewSegments" class="review-segments"></div>
               </section>
+
+              <dialog id="reprocessDialog" class="reprocess-dialog" aria-labelledby="reprocessDialogTitle">
+                <div class="dialog-heading"><div><div class="panel-kicker">写入前预览</div><h2 id="reprocessDialogTitle">先核对本机模型将要修改的内容</h2></div><span class="candidate-label">尚未写入</span></div>
+                <p class="dialog-explainer">以下差异覆盖本次重新整理会影响的所有 Vault 笔记。关闭窗口或选择“暂不写入”，都不会更改笔记。</p>
+                <div id="reprocessDiffs" class="reprocess-diffs"></div>
+                <p id="reprocessDialogStatus" class="dialog-status" aria-live="polite"></p>
+                <div class="dialog-actions"><button id="cancelReprocess" class="button button-outline" type="button">暂不写入</button><button id="approveReprocess" class="button button-primary" type="button">确认写入这些更改</button></div>
+              </dialog>
             </div>
 
             <aside class="secondary-column" aria-label="本机状态与设置">

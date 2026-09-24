@@ -51,14 +51,21 @@ This is a productization candidate, not a formal public release. CI installation
 
 Issue #6 remains open pending packaged-app interaction acceptance. Source implementation now links current model assertions to transcript segments and audio offsets; stale analysis is hidden after transcript changes.
 
-Actual Whisper and Ollama model runs, speaker diarization and persistent voice identity review, approval-before-write for semantic recompiles, update delivery, Windows code signing, and macOS signing/notarization also remain open. The desktop app writes Markdown and machine-readable sidecars directly into the selected Vault; see `obsidian-plugin/README.md` for the initial plugin implementation and its acceptance boundaries.
+Actual Whisper and Ollama model runs, speaker diarization and persistent voice identity review, update delivery, Windows code signing, and macOS signing/notarization also remain open. The desktop app writes Markdown and machine-readable sidecars directly into the selected Vault; see `obsidian-plugin/README.md` for its current scope and acceptance boundaries.
 
 ## Initial Obsidian plugin implementation
 
 - A desktop-only plugin source/package now opens records from their `voice_memory_id` frontmatter or an explicit ID, plays the immutable ledger audio with HTTP byte-range seeking, navigates claim evidence, confirms a speaker for the current record, and requests local-profile reprocessing with a resulting Markdown diff.
 - The API only accepts the exact Obsidian app origin in addition to existing local clients, and audio responses expose range headers for that origin. Plugin API endpoints are restricted to localhost/loopback; no cloud path is implemented.
 - Local validation: Node syntax and loopback security tests passed; Python suite 65 passed; deterministic plugin ZIP contents verified. The package is not yet accepted inside the installed Obsidian app.
-- The current recompile endpoint writes the managed block before returning its diff. Rollback data is retained, but preview-before-approval is not implemented. Speaker confirmation is per-record only; persistent voice profiles are not implemented.
+- The plugin was not yet accepted inside the installed Obsidian app. Speaker confirmation is per-record only; persistent voice profiles are not implemented.
+
+## Approval-before-write candidate
+
+- `POST /records/<id>/reprocess` now renders a read-only preview of every affected Markdown note and returns an expiring approval token. Approval is idempotent, so a client can safely retry if the response is lost; it writes only once. Cancelling or closing the preview discards an unapproved token; no note, sidecar, rollback snapshot, or diff is written by the preview request.
+- `POST /records/<id>/reprocess/approve` verifies that the record sidecar and every affected note still match the preview-time SHA-256 values before writing. A stale record or user-edited note returns HTTP 409; an expired or cancelled token returns HTTP 410. The complete preview is capped at 1 MB to avoid asking the user to approve a truncated diff.
+- The desktop Review Studio and Obsidian plugin now present all affected note diffs with explicit approve and cancel actions. The actual write retains the existing rollback snapshots and compiler-owned block boundaries.
+- Local regression coverage verifies read-only preview, exact preview-to-write Markdown diffs, user-content preservation, cancellation, idempotent approval, and refusal after either the record or a note changes. Packaged desktop and installed Obsidian interaction still need separate acceptance after the candidate commit's CI run.
 
 ## Current UI candidate (`23f7efb`)
 
