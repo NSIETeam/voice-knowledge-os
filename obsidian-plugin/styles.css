@@ -1,0 +1,16 @@
+.vm-record-id-input { width: 100%; margin: 10px 0; }
+.vm-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.vm-toolbar audio { flex: 1; min-width: 0; }
+.vm-analysis { margin: 14px 0 18px; padding: 14px; background: #f3f4ec; border-left: 3px solid #1b3d32; border-radius: 8px; }
+.vm-analysis h3, .vm-segments h3 { margin-top: 0; }
+.vm-claim, .vm-segment { margin: 8px 0; padding: 12px; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 8px; }
+.vm-claim p, .vm-segment p { margin: 6px 0 10px; line-height: 1.65; white-space: pre-wrap; }
+.vm-evidence-link { margin: 3px 5px 2px 0; color: #1b3d32; background: #edf2e8; }
+.vm-segment-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.vm-segment-head span, .vm-status { color: var(--text-muted); font-size: var(--font-smaller); }
+.vm-segment.is-overlap { border-left: 3px solid #b86b4b; }
+.vm-segment.is-target { outline: 2px solid #78906d; background: #f3f4ec; }
+.vm-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--background-modifier-border); }
+.vm-footer select { flex: 1; min-width: 150px; }
+.vm-diff { max-height: 65vh; overflow: auto; padding: 12px; color: var(--text-normal); background: var(--background-secondary); white-space: pre-wrap; }
+.vm-error { color: var(--text-error); }

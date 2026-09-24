@@ -5,6 +5,37 @@ on:
   pull_request:
 
 jobs:
+  obsidian-plugin:
+    strategy:
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate Obsidian plugin bundle files
+        shell: bash
+        run: |
+          node --check obsidian-plugin/main.js
+          node --test obsidian-plugin/test/*.test.cjs
+          node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('obsidian-plugin/manifest.json','utf8')); const v=JSON.parse(fs.readFileSync('obsidian-plugin/versions.json','utf8')); if(!m.id || !m.version || v[m.version] !== m.minAppVersion) process.exit(1); for (const f of ['main.js','loopback.js','manifest.json','styles.css','versions.json']) if(!fs.statSync('obsidian-plugin/'+f).isFile()) process.exit(1);"
+      - name Package installable Obsidian plugin
+        if: matrix.os == 'macos-14'
+        shell: bash
+        run: python obsidian-plugin/package.py --output "$RUNNER_TEMP/voice-memory-obsidian-plugin.zip"
+      - name Upload Obsidian plugin bundle
+        if: matrix.os == 'macos-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-memory-obsidian-plugin
+          path: ${{ runner.temp }}/voice-memory-obsidian-plugin.zip
+
+
   smoke:
     strategy:
       matrix:

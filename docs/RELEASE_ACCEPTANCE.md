@@ -51,7 +51,14 @@ This is a productization candidate, not a formal public release. CI installation
 
 Issue #6 remains open pending packaged-app interaction acceptance. Source implementation now links current model assertions to transcript segments and audio offsets; stale analysis is hidden after transcript changes.
 
-Actual Whisper and Ollama model runs, speaker diarization and voice identity review, a native Obsidian plugin, update delivery, Windows code signing, and macOS signing/notarization also remain open. The current app writes Markdown and machine-readable sidecars directly into the selected Vault; that is not a native Obsidian plugin integration.
+Actual Whisper and Ollama model runs, speaker diarization and persistent voice identity review, approval-before-write for semantic recompiles, update delivery, Windows code signing, and macOS signing/notarization also remain open. The desktop app writes Markdown and machine-readable sidecars directly into the selected Vault; see `obsidian-plugin/README.md` for the initial plugin implementation and its acceptance boundaries.
+
+## Initial Obsidian plugin implementation
+
+- A desktop-only plugin source/package now opens records from their `voice_memory_id` frontmatter or an explicit ID, plays the immutable ledger audio with HTTP byte-range seeking, navigates claim evidence, confirms a speaker for the current record, and requests local-profile reprocessing with a resulting Markdown diff.
+- The API only accepts the exact Obsidian app origin in addition to existing local clients, and audio responses expose range headers for that origin. Plugin API endpoints are restricted to localhost/loopback; no cloud path is implemented.
+- Local validation: Node syntax and loopback security tests passed; Python suite 65 passed; deterministic plugin ZIP contents verified. The package is not yet accepted inside the installed Obsidian app.
+- The current recompile endpoint writes the managed block before returning its diff. Rollback data is retained, but preview-before-approval is not implemented. Speaker confirmation is per-record only; persistent voice profiles are not implemented.
 
 ## Current UI candidate (`23f7efb`)
 

@@ -12,6 +12,7 @@ import time
 import uuid
 from dataclasses import replace
 from datetime import datetime
+from difflib import unified_diff
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -39,7 +40,7 @@ INDEX_HTML = """<!doctype html>
 class VoiceMemoryHandler(BaseHTTPRequestHandler):
     ledger: AudioLedger
     jobs: JobStore
-    allowed_origins = {"http://tauri.localhost", "tauri://localhost", "http://127.0.0.1:8765", "http://localhost:8765"}
+    allowed_origins = {"http://tauri.localhost", "tauri://localhost", "http://127.0.0.1:8765", "http://localhost:8765", "app://obsidian.md"}
     allowed_headers = ("Content-Type", "X-File-Name", "X-Audio-Source")
     _index_lock = threading.Lock()
 
@@ -161,6 +162,11 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(end - start + 1))
                 self.send_header("Accept-Ranges", "bytes")
+                origin = self._cors_origin()
+                if origin:
+                    self.send_header("Access-Control-Allow-Origin", origin)
+                    self.send_header("Vary", "Origin")
+                    self.send_header("Access-Control-Expose-Headers", "Accept-Ranges, Content-Length, Content-Range")
                 if status == HTTPStatus.PARTIAL_CONTENT:
                     self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
                 self.end_headers()
@@ -236,6 +242,12 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                     payload.get("processor_model", ""),
                 ).process(processing_record)
                 vault = sidecar_path.parent.parent.parent
+                if profile == record.primary_mode:
+                    validate_record_title(record.title)
+                    target_before = vault / "Recordings" / f"{record.title}.md"
+                else:
+                    target_before = vault / "Recordings" / "Views" / record.id / f"{profile}.md"
+                before_text = target_before.read_text(encoding="utf-8") if target_before.is_file() else ""
                 write_compiled(
                     record,
                     vault,
@@ -243,10 +255,24 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                     analysis=analysis,
                 )
                 updated = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                view_path = updated.get("analysis_view_paths", {}).get(profile)
+                target_after = Path(view_path) if view_path else target_before
+                after_text = target_after.read_text(encoding="utf-8")
+                diff = "".join(unified_diff(
+                    before_text.splitlines(keepends=True),
+                    after_text.splitlines(keepends=True),
+                    fromfile=f"{target_after.name} (before)",
+                    tofile=f"{target_after.name} (after)",
+                ))
+                diff_truncated = len(diff) > 100_000
+                if diff_truncated:
+                    diff = diff[:100_000] + "\n…差异超过 100,000 字符，已截断；完整差异保存在 Vault 的 .voice-memory/diffs 中。\n"
                 self._json(HTTPStatus.OK, {
                     "record": updated["record"],
                     "analysis": updated.get("analysis_views", {}).get(profile),
-                    "view_path": updated.get("analysis_view_paths", {}).get(profile),
+                    "view_path": view_path,
+                    "diff": diff,
+                    "diff_truncated": diff_truncated,
                 })
             except (FileNotFoundError, KeyError, ValueError, TypeError, json.JSONDecodeError) as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})

@@ -80,6 +80,39 @@ def test_api_rejects_untrusted_browser_origins_and_simple_content_types(tmp_path
         server.shutdown()
 
 
+def test_ledger_audio_supports_trusted_obsidian_range_requests(tmp_path):
+    from voice_memory.jobs import JobStore
+
+    data_root = tmp_path / "data"
+    handler = type(
+        "ObsidianAudioHandler",
+        (VoiceMemoryHandler,),
+        {"data_root": data_root, "ledger": AudioLedger(data_root), "jobs": JobStore(data_root)},
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        upload = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/ledger/upload",
+            data=b"range-audio",
+            headers={"Content-Type": "application/octet-stream", "X-File-Name": "test.wav"},
+            method="POST",
+        )
+        asset = json.load(urllib.request.urlopen(upload))
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/ledger/{asset['id']}/content",
+            headers={"Origin": "app://obsidian.md", "Range": "bytes=0-3"},
+        )
+        with urllib.request.urlopen(request) as response:
+            assert response.status == 206
+            assert response.read() == b"rang"
+            assert response.headers["Access-Control-Allow-Origin"] == "app://obsidian.md"
+            assert response.headers["Content-Range"] == f"bytes 0-3/{len(b'range-audio')}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [("title", "../../../outside"), ("id", "../../../outside")],
@@ -290,6 +323,8 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
         with urllib.request.urlopen(reprocess_request) as response:
             reprocessed = json.load(response)
         assert reprocessed["analysis"]["profile"] == "decision"
+        assert "有证据支持的本机候选总结" in reprocessed["diff"]
+        assert reprocessed["diff_truncated"] is False
         assert reprocessed["analysis"]["source_transcript_sha256"] == transcript_fingerprint(
             ConversationRecord(
                 **{key: value for key, value in reprocessed["record"].items() if key != "segments"},

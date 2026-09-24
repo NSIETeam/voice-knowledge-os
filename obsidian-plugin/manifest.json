@@ -1,0 +1,9 @@
+{
+  "id": "voice-memory-local",
+  "name": "Voice Memory",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Review local voice records and evidence directly in Obsidian.",
+  "author": "Voice Memory contributors",
+  "isDesktopOnly": true
+}

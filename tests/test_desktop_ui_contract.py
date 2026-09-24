@@ -19,3 +19,21 @@ def test_desktop_javascript_static_selectors_exist_in_html():
     assert ".evidence-link" in styles
     assert 'src="/assets/miraphant.svg"' in html
     assert 'fill="#1B3D32"' in brand_mark
+
+
+def test_obsidian_plugin_contract_is_local_and_evidence_linked():
+    root = Path(__file__).resolve().parents[1]
+    plugin = root / "obsidian-plugin"
+    main = (plugin / "main.js").read_text(encoding="utf-8")
+    loopback = (plugin / "loopback.js").read_text(encoding="utf-8")
+    manifest = (plugin / "manifest.json").read_text(encoding="utf-8")
+    styles = (plugin / "styles.css").read_text(encoding="utf-8")
+    assert '"isDesktopOnly": true' in manifest
+    assert "require('./loopback')" in main
+    assert "http:" in loopback and "ALLOWED_HOSTS" in loopback
+    assert "127.0.0.1" in main
+    assert "requestUrl" in main
+    assert "speaker_status: 'confirmed'" in main
+    assert "reprocess" in main and "result.diff" in main
+    assert "audio_asset_id" in main and "jump(segment)" in main
+    assert ".vm-analysis" in styles and ".vm-evidence-link" in styles
