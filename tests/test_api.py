@@ -6,8 +6,10 @@ import urllib.request
 import urllib.error
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+import pytest
 from voice_memory import api
 from voice_memory.api import INDEX_HTML, VoiceMemoryHandler
+from voice_memory.cli import demo_record
 from voice_memory.ledger import AudioLedger
 from voice_memory.models import ConversationRecord, Segment
 from voice_memory.processing import transcript_fingerprint
@@ -76,6 +78,41 @@ def test_api_rejects_untrusted_browser_origins_and_simple_content_types(tmp_path
             assert json.load(error)["error"] == "content_type_must_be_application_json"
     finally:
         server.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("title", "../../../outside"), ("id", "../../../outside")],
+)
+def test_compile_api_rejects_path_components_before_writing(tmp_path, field, value):
+    data_root = tmp_path / "data"
+    handler = type(
+        "CompilePathTestHandler",
+        (VoiceMemoryHandler,),
+        {"data_root": data_root, "ledger": AudioLedger(data_root)},
+    )
+    from voice_memory.jobs import JobStore
+    handler.jobs = JobStore(data_root)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    vault = tmp_path / "vault"
+    record = demo_record().to_dict()
+    record[field] = value
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_port}/records/compile",
+        data=json.dumps({"record": record, "vault": str(vault)}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with pytest.raises(urllib.error.HTTPError) as response:
+            urllib.request.urlopen(request)
+        assert response.value.code == 400
+        assert not vault.exists()
+        assert not (tmp_path / "outside.md").exists()
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_tauri_audio_upload_preflight_allows_source_header(tmp_path):
