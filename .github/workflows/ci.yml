@@ -7,6 +7,7 @@ on:
 jobs:
   obsidian-plugin:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-14, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -38,6 +39,7 @@ jobs:
 
   smoke:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-14, windows-latest, ubuntu-latest]
         python: ['3.11', '3.12', '3.13']
