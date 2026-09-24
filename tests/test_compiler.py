@@ -15,6 +15,28 @@ def test_compiler_preserves_evidence_and_managed_boundaries():
     assert "^seg-0002" in output
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("title", "../outside"),
+        ("title", "CON.txt"),
+        ("title", "trailing."),
+        ("title", "😀" * 91),
+        ("id", "../outside"),
+        ("id", "CON"),
+    ],
+)
+def test_write_compiled_rejects_unsafe_path_components_before_writing(tmp_path, field, value):
+    record = demo_record()
+    setattr(record, field, value)
+    vault = tmp_path / "vault"
+
+    with pytest.raises(ValueError):
+        write_compiled(record, vault)
+
+    assert not vault.exists()
+
+
 def test_compiler_exposes_uncertainty():
     record = demo_record()
     record.segments[0].confidence = 0.51

@@ -20,7 +20,7 @@ from typing import Any
 from .ledger import AudioLedger
 from .compiler import write_compiled
 from .jobs import JobStore
-from .models import ConversationRecord, PROFILES, Segment
+from .models import ConversationRecord, PROFILES, Segment, validate_record_title
 from .transcription import FixtureProvider, WhisperCppProvider
 from .review import apply_correction
 from .processing import LocalOllamaProcessor
@@ -315,15 +315,7 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                     raise FileNotFoundError("audio asset is unavailable")
                 if Path(job.source_path).resolve() != source:
                     raise ValueError("job source does not match audio asset")
-                title = payload["title"].strip()
-                forbidden = '<>:"/\\|?*\0'
-                reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
-                if not title or title != title.strip() or title in {".", ".."} or any(char in title for char in forbidden):
-                    raise ValueError("title must be a filename, not a path")
-                if title.endswith((".", " ")) or title.split(".", 1)[0].upper() in reserved:
-                    raise ValueError("title is not a valid Windows filename")
-                if len(title) > 180 or any(ord(char) < 32 for char in title):
-                    raise ValueError("title is too long or contains control characters")
+                title = validate_record_title(payload["title"])
                 profile = payload.get("primary_mode", "knowledge")
                 if profile not in PROFILES:
                     raise ValueError(f"unknown processing profile: {profile}")

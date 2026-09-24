@@ -28,6 +28,12 @@ class JobStore:
         self._lock = threading.RLock()
 
     def _path(self, job_id: str) -> Path:
+        try:
+            parsed = uuid.UUID(job_id)
+        except (AttributeError, TypeError, ValueError):
+            raise FileNotFoundError(job_id) from None
+        if str(parsed) != job_id:
+            raise FileNotFoundError(job_id)
         return self.root / f"{job_id}.json"
 
     def get(self, job_id: str) -> ProcessingJob:

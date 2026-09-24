@@ -1,7 +1,41 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+
+_SAFE_RECORD_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+_WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+    "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³",
+}
+
+
+def validate_record_id(record_id: str) -> str:
+    if not isinstance(record_id, str) or not _SAFE_RECORD_ID.fullmatch(record_id):
+        raise ValueError("record ID must be a safe filename component")
+    if record_id.endswith(".") or record_id.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES:
+        raise ValueError("record ID is not a valid cross-platform filename")
+    return record_id
+
+
+def validate_record_title(title: str) -> str:
+    forbidden = '<>:"/\\|?*\0'
+    if (
+        not isinstance(title, str)
+        or not title
+        or title != title.strip()
+        or title in {".", ".."}
+        or any(char in forbidden or ord(char) < 32 for char in title)
+        or title.endswith((".", " "))
+        or title.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES
+        or len(title.encode("utf-16-le")) // 2 > 180
+    ):
+        raise ValueError("title must be a valid cross-platform filename, not a path")
+    return title
 
 
 @dataclass

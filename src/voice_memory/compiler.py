@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from difflib import unified_diff
 
-from .models import ConversationRecord, PROFILES
+from .models import ConversationRecord, PROFILES, validate_record_id, validate_record_title
 from .processing import transcript_fingerprint
 
 
@@ -294,6 +294,8 @@ def write_compiled(
     correction_history: list[dict] | None = None,
     analysis: dict | None = None,
 ) -> Path:
+    validate_record_id(record.id)
+    validate_record_title(record.title)
     vault_path = Path(vault)
     destination = vault_path / "Recordings" / f"{record.title}.md"
     destination.parent.mkdir(parents=True, exist_ok=True)
