@@ -9,7 +9,7 @@ Previous cross-platform acceptance covered product code `20ff6880d253f3c9330faba
 - The Apple Silicon Review Studio was exercised locally from a source-built app and matching sidecar, using an isolated temporary home and vault: load record, edit timing/speaker, split, merge, undo, redo, and normal quit with listener cleanup all passed.
 - The local Python suite passed with 61 tests; `npm run frontend:build` passed. Source transcript snapshots remained unchanged through review edits.
 
-## Latest local candidate: `56fb396`
+## Previous packaged candidate: `56fb396`
 
 - Apple Silicon native microphone capture now uses CoreAudio through CPAL; float32 samples are stored directly and int16 samples are converted to float WAV. The app bundle includes a Chinese `NSMicrophoneUsageDescription`. Audio is written to a recoverable cache WAV before upload to the local ledger, and the cache is removed only after the ledger confirms the upload.
 - A local `aarch64-apple-darwin` `.app` and DMG were built. The installed copy passed the package smoke test: permission-purpose key present, app-owned loopback API started with all seven profiles, and normal quit removed the listener and sidecar.
@@ -49,14 +49,15 @@ The ZIP digests above are the GitHub Actions artifact digests for run `359466328
 
 This is a productization candidate, not a formal public release. CI installation tests do not prove that audio capture works with a user's physical devices. Before calling the product fully accepted on either platform, exercise a real microphone recording through save, transcription, review, and Vault write on that OS, including macOS permission grant/denial and recovery. Windows additionally needs real-device WASAPI loopback tests with active playback, silence, device removal, and simultaneous microphone capture. Native macOS system-audio capture is not implemented.
 
-Issue #6 remains open: assertions do not yet navigate to transcript evidence from the claim UI.
+Issue #6 remains open pending packaged-app interaction acceptance. Source implementation now links current model assertions to transcript segments and audio offsets; stale analysis is hidden after transcript changes.
 
 Actual Whisper and Ollama model runs, speaker diarization and voice identity review, a native Obsidian plugin, update delivery, Windows code signing, and macOS signing/notarization also remain open. The current app writes Markdown and machine-readable sidecars directly into the selected Vault; that is not a native Obsidian plugin integration.
 
-## Review Studio evidence navigation (`a105d23`)
+## Current UI candidate (`23f7efb`)
 
 - Current analysis views are exposed to the desktop UI only when their source transcript fingerprint matches the current record. Stale views remain in the sidecar for provenance but are not presented as current candidates.
 - Model summaries and findings link to the cited transcript segments. Selecting evidence scrolls to and highlights the source segment and seeks/plays its audio range.
 - Unsaved edits suspend candidate display with a clear stale-evidence explanation. This implementation does not itself close Issue #6: validate the interaction in the packaged app and retain the remaining platform/device acceptance gates.
-- Python suite: 61 passed. Frontend production build passed. Python GitHub matrix run `35951532425` passed; desktop workflow `35951532459` passed on Apple Silicon macOS while Windows x64 packaging/acceptance was still running at documentation time.
+- Python suite: 61 passed. Frontend production build passed. Python GitHub matrix run `35952304107` passed. Desktop workflow `35952304056` passed on Windows x64 and Apple Silicon macOS, including capture-adapter tests, packaged install/start/quit smoke checks, and artifact upload.
 - The Miraphant compound logo asset is now used by the desktop UI. The deep-green identity color is `#1B3D32`; logo artwork was sourced from the local Miraphant brand asset already available in the user's workspace.
+- This is CI/package-lifecycle evidence, not real-device acceptance. Physical microphone recording, Windows playback loopback cases, model inference, and packaged Review Studio interaction remain separate release gates.
