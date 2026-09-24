@@ -51,7 +51,9 @@ function refreshActions() {
   }
   const ready = missing.length === 0;
   transcribeButton.disabled = !ready;
-  if (!ready) processStatus.textContent = `还需：${missing.join(' · ')}`;
+  if (!ready) processStatus.textContent = currentAsset
+    ? `还需：${missing.join(' · ')}。请在右侧「本地工具设置」完成一次配置。`
+    : '录音或导入音频后，再设置 Obsidian Vault 与本机转写工具。';
 }
 
 function localTimestamp() {
