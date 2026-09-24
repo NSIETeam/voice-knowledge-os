@@ -368,11 +368,111 @@ document.querySelector('#record').addEventListener('click', async (event) => {
 });
 
 let reviewRecord;
+let reviewHistory = [];
+let reviewPlaybackEnd = null;
 const reviewStatus = document.querySelector('#reviewStatus');
 const reviewSegments = document.querySelector('#reviewSegments');
+const reviewTimeline = document.querySelector('#reviewTimeline');
+const reviewRuler = document.querySelector('#reviewRuler');
+const reviewTracks = document.querySelector('#reviewTracks');
 const saveReview = document.querySelector('#saveReview');
 const reanalyzeButton = document.querySelector('#reanalyze');
 const reviewAudio = document.querySelector('#reviewAudio');
+const undoReview = document.querySelector('#undoReview');
+const redoReview = document.querySelector('#redoReview');
+const mergeSelected = document.querySelector('#mergeSelected');
+const reviewSelectionCount = document.querySelector('#reviewSelectionCount');
+
+function syncReviewHistoryControls() {
+  undoReview.disabled = !reviewHistory.some(item => (item.kind || 'change') === 'change' && item.active !== false);
+  redoReview.disabled = !reviewHistory.some(item => item.kind === 'undo' && !item.redone && !item.abandoned);
+}
+
+function formatTime(seconds) {
+  const value = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+}
+
+function reviewDuration() {
+  const mediaDuration = Number.isFinite(reviewAudio.duration) ? reviewAudio.duration : 0;
+  const segmentEnd = Math.max(0, ...(reviewRecord?.segments || []).map(segment => segment.end));
+  return Math.max(mediaDuration, segmentEnd, 0.1);
+}
+
+function updateTimelinePlayhead() {
+  for (const track of reviewTracks.querySelectorAll('.timeline-track')) {
+    let playhead = track.querySelector('.timeline-playhead');
+    if (!playhead) { playhead = document.createElement('span'); playhead.className = 'timeline-playhead'; track.append(playhead); }
+    playhead.style.left = `${Math.min(100, Math.max(0, reviewAudio.currentTime / reviewDuration() * 100))}%`;
+  }
+  if (reviewPlaybackEnd !== null && reviewAudio.currentTime >= reviewPlaybackEnd) {
+    reviewAudio.pause();
+    reviewPlaybackEnd = null;
+  }
+}
+
+async function seekAndPlay(start, end = null) {
+  if (!reviewRecord?.audio_asset_id) { reviewStatus.textContent = '此记录未关联本地音频资产'; return; }
+  reviewPlaybackEnd = end;
+  try {
+    if (reviewAudio.readyState < HTMLMediaElement.HAVE_METADATA) {
+      await new Promise((resolve, reject) => {
+        reviewAudio.addEventListener('loadedmetadata', resolve, {once:true});
+        reviewAudio.addEventListener('error', () => reject(new Error('音频无法读取')), {once:true});
+      });
+    }
+    reviewAudio.currentTime = Math.min(start, Math.max(0, reviewAudio.duration - 0.05));
+    await reviewAudio.play();
+  } catch (error) { reviewPlaybackEnd = null; reviewStatus.textContent = `无法播放：${error.message}`; }
+}
+
+function renderTimeline() {
+  if (!reviewRecord?.audio_asset_id) {
+    reviewAudio.hidden = true;
+    reviewTimeline.hidden = true;
+    return;
+  }
+  reviewAudio.hidden = false;
+  const source = `${apiUrl}/ledger/${encodeURIComponent(reviewRecord.audio_asset_id)}/content`;
+  if (reviewAudio.dataset.assetId !== reviewRecord.audio_asset_id) {
+    reviewAudio.dataset.assetId = reviewRecord.audio_asset_id;
+    reviewAudio.src = source;
+    reviewAudio.load();
+  }
+  reviewTimeline.hidden = false;
+  const duration = reviewDuration();
+  reviewRuler.replaceChildren();
+  for (let tick = 0; tick <= 4; tick += 1) {
+    const label = document.createElement('span');
+    label.textContent = formatTime(duration * tick / 4);
+    reviewRuler.append(label);
+  }
+  reviewTracks.replaceChildren();
+  const speakers = [...new Set((reviewRecord.segments || []).map(segment => segment.speaker || '未知说话人'))];
+  for (const speakerName of speakers) {
+    const lane = document.createElement('div'); lane.className = 'timeline-lane';
+    const speaker = document.createElement('span'); speaker.className = 'timeline-speaker'; speaker.textContent = speakerName;
+    const track = document.createElement('div'); track.className = 'timeline-track';
+    for (const segment of reviewRecord.segments.filter(item => (item.speaker || '未知说话人') === speakerName)) {
+      const block = document.createElement('button');
+      block.type = 'button';
+      block.className = `timeline-segment ${segment.speaker_status || 'unknown'}${segment.unclear ? ' unclear' : ''}`;
+      block.style.left = `${Math.max(0, segment.start / duration * 100)}%`;
+      block.style.width = `${Math.max(0.7, (segment.end - segment.start) / duration * 100)}%`;
+      block.textContent = segment.text.slice(0, 28) || '片段';
+      block.title = `${formatTime(segment.start)}–${formatTime(segment.end)} · ${speakerName}${segment.overlap ? ' · 重叠发言' : ''}`;
+      block.setAttribute('aria-label', `播放 ${speakerName}，${formatTime(segment.start)} 到 ${formatTime(segment.end)}`);
+      block.addEventListener('click', () => seekAndPlay(segment.start, segment.end));
+      track.append(block);
+    }
+    lane.append(speaker, track); reviewTracks.append(lane);
+  }
+  updateTimelinePlayhead();
+}
+
+reviewAudio.addEventListener('loadedmetadata', renderTimeline);
+reviewAudio.addEventListener('timeupdate', updateTimelinePlayhead);
+reviewAudio.addEventListener('play', updateTimelinePlayhead);
 
 function reviewBadge(status) {
   const badge = document.createElement('span');
@@ -389,9 +489,16 @@ function renderReview(record) {
     article.dataset.segmentId = segment.id;
     const meta = document.createElement('div');
     meta.className = 'review-meta';
-    const time = document.createElement('span');
-    time.textContent = `${segment.start.toFixed(1)}s–${segment.end.toFixed(1)}s`;
-    meta.append(time, reviewBadge(segment.speaker_status));
+    const selected = document.createElement('input');
+    selected.type = 'checkbox'; selected.className = 'segment-select'; selected.setAttribute('aria-label', '选择此片段以合并');
+    selected.addEventListener('change', updateMergeSelection);
+    const time = document.createElement('div'); time.className = 'segment-time';
+    const start = document.createElement('input'); start.type = 'number'; start.min = '0'; start.step = '0.01'; start.value = segment.start.toFixed(2); start.dataset.initialValue = start.value; start.setAttribute('aria-label', '片段开始时间（秒）');
+    const separator = document.createElement('span'); separator.textContent = '至';
+    const end = document.createElement('input'); end.type = 'number'; end.min = '0'; end.step = '0.01'; end.value = segment.end.toFixed(2); end.dataset.initialValue = end.value; end.setAttribute('aria-label', '片段结束时间（秒）');
+    time.append(start, separator, end);
+    const segmentId = document.createElement('span'); segmentId.className = 'badge'; segmentId.textContent = segment.id;
+    meta.append(selected, time, reviewBadge(segment.speaker_status), segmentId);
     const speaker = document.createElement('input');
     speaker.value = segment.speaker;
     speaker.setAttribute('aria-label', '说话人');
@@ -410,29 +517,82 @@ function renderReview(record) {
     const overlapText = document.createTextNode(' 重叠发言 ');
     const unclear = document.createElement('input'); unclear.type = 'checkbox'; unclear.checked = Boolean(segment.unclear); unclear.style.width = 'auto';
     flags.append(overlap, overlapText, unclear, document.createTextNode(' 不清楚'));
-    const play = document.createElement('button');
-    play.type = 'button'; play.textContent = '播放此段';
-    play.addEventListener('click', async () => {
-      if (!reviewRecord.audio_asset_id) { reviewStatus.textContent = '此记录未关联本地音频资产'; return; }
-      reviewAudio.src = `${apiUrl}/ledger/${encodeURIComponent(reviewRecord.audio_asset_id)}/content`;
-      reviewAudio.style.display = 'block';
-      try {
-        if (reviewAudio.readyState < HTMLMediaElement.HAVE_METADATA) {
-          await new Promise((resolve, reject) => {
-            reviewAudio.addEventListener('loadedmetadata', resolve, {once:true});
-            reviewAudio.addEventListener('error', () => reject(new Error('音频无法读取')), {once:true});
-            reviewAudio.load();
-          });
-        }
-        reviewAudio.currentTime = segment.start;
-        await reviewAudio.play();
-      } catch (error) { reviewStatus.textContent = `无法播放：${error.message}`; }
+    const controls = document.createElement('div'); controls.className = 'review-controls';
+    const play = document.createElement('button'); play.type = 'button'; play.className = 'button button-outline'; play.textContent = '播放此段';
+    play.addEventListener('click', () => seekAndPlay(segment.start, segment.end));
+    const split = document.createElement('button'); split.type = 'button'; split.className = 'button button-outline'; split.textContent = '在光标处拆分';
+    split.addEventListener('click', async () => {
+      const cursor = text.selectionStart;
+      const leftText = text.value.slice(0, cursor).trim();
+      const rightText = text.value.slice(cursor).trim();
+      if (!leftText || !rightText) { reviewStatus.textContent = '请先把光标放到要拆分的位置，两侧都需要有文字'; text.focus(); return; }
+      const splitAt = Math.round((segment.start + (segment.end - segment.start) * cursor / Math.max(1, text.value.length)) * 100) / 100;
+      await postReviewCorrection({type:'split', segment_id:segment.id, split_at:splitAt, left_text:leftText, right_text:rightText}, '片段已拆分');
     });
-    article.append(meta, text, flags, play);
+    const saveTiming = document.createElement('button'); saveTiming.type = 'button'; saveTiming.className = 'button button-outline'; saveTiming.textContent = '保存时间';
+    saveTiming.addEventListener('click', async () => {
+      if (start.value === start.dataset.initialValue && end.value === end.dataset.initialValue) return;
+      await postReviewCorrection({type:'edit_timing', segment_id:segment.id, start:Number(start.value), end:Number(end.value)}, '时间范围已更新');
+    });
+    const flagsLabel = document.createElement('span'); flagsLabel.className = 'review-flags'; flagsLabel.append(flags);
+    controls.append(play, split, saveTiming, flagsLabel);
+    article.append(meta, text, controls);
     reviewSegments.append(article);
   }
   saveReview.disabled = false;
   reanalyzeButton.disabled = !document.querySelector('#ollamaModel').value.trim();
+  renderTimeline();
+  syncReviewHistoryControls();
+  updateMergeSelection();
+}
+
+function selectedReviewSegments() {
+  return [...reviewSegments.querySelectorAll('.review-segment')]
+    .filter(article => article.querySelector('.segment-select').checked)
+    .map(article => article.dataset.segmentId);
+}
+
+function updateMergeSelection() {
+  const ids = selectedReviewSegments();
+  mergeSelected.disabled = ids.length !== 2;
+  reviewSelectionCount.textContent = ids.length
+    ? `已选择 ${ids.length} 段；只能合并相邻且说话人相同的片段`
+    : '选择两个相邻、同一说话人的片段进行合并';
+}
+
+function hasPendingReviewEdits({ignoreText = false} = {}) {
+  if (!reviewRecord) return false;
+  return [...reviewSegments.querySelectorAll('.review-segment')].some(article => {
+    const original = reviewRecord.segments.find(item => item.id === article.dataset.segmentId);
+    if (!original) return false;
+    const flags = article.querySelectorAll('.review-flags input[type="checkbox"]');
+    return (!ignoreText && article.querySelector('textarea').value.trim() !== original.text)
+      || article.querySelector('input[aria-label="说话人"]').value.trim() !== original.speaker
+      || article.querySelector('select').value !== (original.speaker_status || 'unknown')
+      || article.querySelector('[aria-label="片段开始时间（秒）"]').value !== article.querySelector('[aria-label="片段开始时间（秒）"]').dataset.initialValue
+      || article.querySelector('[aria-label="片段结束时间（秒）"]').value !== article.querySelector('[aria-label="片段结束时间（秒）"]').dataset.initialValue
+      || flags[0].checked !== Boolean(original.overlap)
+      || flags[1].checked !== Boolean(original.unclear);
+  });
+}
+
+async function postReviewCorrection(operation, successMessage) {
+  if (!reviewRecord) return;
+  if (hasPendingReviewEdits({ignoreText:operation.type === 'split'})) {
+    reviewStatus.textContent = '请先保存当前说话人、标记或时间修改，再执行此操作';
+    return;
+  }
+  try {
+    const response = await fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}/corrections`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(operation),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    reviewRecord = result.record;
+    reviewHistory = result.correction_history || reviewHistory;
+    renderReview(reviewRecord);
+    reviewStatus.textContent = successMessage;
+  } catch (error) { reviewStatus.textContent = `修改失败：${error.message}`; }
 }
 
 document.querySelector('#loadReview').addEventListener('click', async () => {
@@ -443,10 +603,19 @@ document.querySelector('#loadReview').addEventListener('click', async () => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const sidecar = await response.json();
     reviewRecord = sidecar.record;
+    reviewHistory = sidecar.correction_history || [];
     document.querySelector('#profile').value = reviewRecord.primary_mode;
     renderReview(reviewRecord);
     reviewStatus.textContent = `已加载 ${reviewRecord.title}，历史修正 ${sidecar.correction_history?.length || 0} 次`;
-  } catch (error) { reviewStatus.textContent = `加载失败：${error.message}`; reviewSegments.replaceChildren(); saveReview.disabled = true; }
+  } catch (error) { reviewStatus.textContent = `加载失败：${error.message}`; reviewSegments.replaceChildren(); reviewTimeline.hidden = true; reviewAudio.hidden = true; saveReview.disabled = true; reviewHistory = []; syncReviewHistoryControls(); }
+});
+
+undoReview.addEventListener('click', () => postReviewCorrection({type:'undo'}, '已撤销最近一次复核修改'));
+redoReview.addEventListener('click', () => postReviewCorrection({type:'redo'}, '已重做复核修改'));
+mergeSelected.addEventListener('click', async () => {
+  const ids = selectedReviewSegments();
+  if (ids.length !== 2) return;
+  await postReviewCorrection({type:'merge', segment_ids:ids}, '选中的相邻片段已合并');
 });
 
 document.querySelector('#ollamaModel').addEventListener('input', () => {
@@ -532,13 +701,21 @@ saveReview.addEventListener('click', async () => {
       const text = article.querySelector('textarea').value.trim();
       const speaker = article.querySelector('input[aria-label="说话人"]').value.trim();
       const state = article.querySelector('select').value;
-      const overlap = article.querySelectorAll('input[type="checkbox"]')[0].checked;
-      const unclear = article.querySelectorAll('input[type="checkbox"]')[1].checked;
+      const reviewFlags = article.querySelectorAll('.review-flags input[type="checkbox"]');
+      const overlap = reviewFlags[0].checked;
+      const unclear = reviewFlags[1].checked;
+      const start = Number(article.querySelector('[aria-label="片段开始时间（秒）"]').value);
+      const end = Number(article.querySelector('[aria-label="片段结束时间（秒）"]').value);
       const send = async (operation) => {
         const response = await fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}/corrections`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(operation)});
         if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
       };
       if (text !== original.text) await send({type:'edit_text', segment_id:original.id, text});
+      const startInput = article.querySelector('[aria-label="片段开始时间（秒）"]');
+      const endInput = article.querySelector('[aria-label="片段结束时间（秒）"]');
+      if (startInput.value !== startInput.dataset.initialValue || endInput.value !== endInput.dataset.initialValue) {
+        await send({type:'edit_timing', segment_id:original.id, start, end});
+      }
       if (speaker !== original.speaker || state !== (original.speaker_status || 'unknown')) await send({type:'relabel', segment_id:original.id, speaker, speaker_status:state});
       if (overlap !== Boolean(original.overlap)) await send({type:'mark_overlap', segment_id:original.id, value:overlap});
       if (unclear !== Boolean(original.unclear)) await send({type:'mark_unclear', segment_id:original.id, value:unclear});
