@@ -125,13 +125,21 @@ def test_compiler_keeps_multiple_profile_views_without_changing_the_record(tmp_p
 def test_recompile_preview_is_read_only_and_matches_approved_markdown(tmp_path):
     from difflib import unified_diff
 
+    def read_exact(path):
+        with path.open("r", encoding="utf-8", newline="") as stream:
+            return stream.read()
+
     record = demo_record()
     vault = tmp_path / "vault"
     canonical = write_compiled(record, vault)
-    canonical.write_text(canonical.read_text(encoding="utf-8") + "\n## 我的补充\n保留这段内容。\n", encoding="utf-8")
+    # Exercise the exact-byte diff contract on every OS, not only runners that
+    # naturally write CRLF. Preview and approval must agree on the Vault bytes.
+    original_bytes = canonical.read_bytes().replace(b"\n", b"\r\n")
+    user_note = "\r\n## 我的补充\r\n保留这段内容。\r\n".encode("utf-8")
+    canonical.write_bytes(original_bytes + user_note)
     sidecar_path = vault / ".voice-memory" / "recordings" / f"{record.id}.json"
     original_sidecar = sidecar_path.read_bytes()
-    original_markdown = canonical.read_text(encoding="utf-8")
+    original_markdown = read_exact(canonical)
     analysis = {
         "schema_version": "voice-memory.analysis.v1",
         "provider": "ollama-local",
@@ -147,14 +155,14 @@ def test_recompile_preview_is_read_only_and_matches_approved_markdown(tmp_path):
 
     assert len(previews) == 2
     assert sidecar_path.read_bytes() == original_sidecar
-    assert canonical.read_text(encoding="utf-8") == original_markdown
+    assert read_exact(canonical) == original_markdown
     view_path = vault / "Recordings" / "Views" / record.id / "knowledge.md"
     assert not view_path.exists()
     write_compiled(record, vault, analysis=analysis, compiled_at=compiled_at)
     for preview in previews:
         path = Path(preview["path"])
         before = original_markdown if path == canonical else ""
-        after = path.read_text(encoding="utf-8")
+        after = read_exact(path)
         expected = "".join(unified_diff(
             before.splitlines(keepends=True), after.splitlines(keepends=True),
             fromfile=f"{path.name} (before)", tofile=f"{path.name} (after)",
