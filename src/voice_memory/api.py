@@ -23,7 +23,7 @@ from .ledger import AudioLedger
 from .compiler import preview_compiled, write_compiled
 from .jobs import JobStore
 from .models import ConversationRecord, PROFILES, Segment, validate_record_title
-from .transcription import FixtureProvider, WhisperCppProvider
+from .transcription import FixtureProvider, NemoSpeechDiarizationProvider, WhisperCppProvider
 from .review import apply_correction
 from .processing import LocalOllamaProcessor, analysis_matches_transcript
 
@@ -493,6 +493,17 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                     )
                 else:
                     raise ValueError(f"unsupported provider: {provider_name}")
+                diarization_executable = payload.get("diarization_executable")
+                if diarization_executable:
+                    if provider_name != "whisper.cpp":
+                        raise ValueError("local diarization currently requires the whisper.cpp transcription provider")
+                    provider = NemoSpeechDiarizationProvider(
+                        provider,
+                        diarization_executable,
+                        payload.get("diarization_model"),
+                        payload.get("ffmpeg_executable", "ffmpeg"),
+                        source_name,
+                    )
                 job = self.jobs.submit(source, provider)
                 self._json(HTTPStatus.ACCEPTED, job.__dict__)
                 return

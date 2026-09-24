@@ -134,6 +134,13 @@
                     <p class="setup-footnote">转码仅在本机运行。目标格式的 WAV、MP3、FLAC、OGG 可直接处理。</p>
                   </div>
                 </details>
+                <details class="setup-details"><summary><span class="setup-dot"></span>说话人分离 · NeMo（可选）</summary>
+                  <div class="setup-body"><p>可选。本机为转写结果添加说话人簇建议；需要单独安装 NeMo-Speech.cpp 并选择已下载的本地模型。不会自动下载模型；模型许可由你选择的模型决定。</p>
+                    <label class="input-group" for="diarizationPath"><span class="input-label">nemo-speech 程序</span><span class="path-input-wrap"><input id="diarizationPath" class="text-input" placeholder="例如 nemo-speech" autocomplete="off" /><button id="chooseDiarization" class="button button-outline small-button" type="button">浏览</button></span></label>
+                    <label class="input-group" for="diarizationModel"><span class="input-label">本地 Sortformer 模型</span><span class="path-input-wrap"><input id="diarizationModel" class="text-input" placeholder="选择本地 .gguf 模型文件" autocomplete="off" /><button id="chooseDiarizationModel" class="button button-outline small-button" type="button">浏览</button></span></label>
+                    <p class="setup-footnote">说话人编号仅属于当前录音，是待人工确认的建议，不代表已识别出真实身份。</p>
+                  </div>
+                </details>
                 <details class="setup-details semantic-details"><summary><span class="setup-dot"></span>语义整理 · Ollama</summary>
                   <div class="setup-body"><p>可选。留空时仍可生成转写和证据索引。</p>
                     <label class="input-group" for="ollamaEndpoint"><span class="input-label">本机服务地址</span><input id="ollamaEndpoint" class="text-input" placeholder="http://127.0.0.1:11434" autocomplete="off" /></label>

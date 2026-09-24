@@ -29,7 +29,7 @@ let currentAsset;
 let lastCompletedJob;
 let pendingUpload;
 
-for (const id of ['vaultPath', 'whisperPath', 'modelPath', 'ffmpegPath', 'ollamaModel']) {
+for (const id of ['vaultPath', 'whisperPath', 'modelPath', 'ffmpegPath', 'ollamaModel', 'diarizationPath', 'diarizationModel']) {
   document.querySelector(`#${id}`).value = localStorage.getItem(`voice-memory.${id}`) || '';
   document.querySelector(`#${id}`).addEventListener('change', (event) => localStorage.setItem(`voice-memory.${id}`, event.target.value));
 }
@@ -162,6 +162,8 @@ choosePath('chooseVault', 'vaultPath', {directory:true, multiple:false, title:'�
 choosePath('chooseWhisper', 'whisperPath', {directory:false, multiple:false, title:'选择 whisper.cpp 程序', filters:[{name:'程序', extensions:['exe','app','bin','command']}]});
 choosePath('chooseModel', 'modelPath', {directory:false, multiple:false, title:'选择 Whisper 模型', filters:[{name:'Whisper 模型', extensions:['bin','gguf']}]});
 choosePath('chooseFfmpeg', 'ffmpegPath', {directory:false, multiple:false, title:'选择 FFmpeg 程序', filters:[{name:'FFmpeg', extensions:['exe','bin','command']}]});
+choosePath('chooseDiarization', 'diarizationPath', {directory:false, multiple:false, title:'选择 NeMo-Speech.cpp 程序', filters:[{name:'程序', extensions:['exe','app','bin','command']}]});
+choosePath('chooseDiarizationModel', 'diarizationModel', {directory:false, multiple:false, title:'选择已下载的本地 Sortformer 模型', filters:[{name:'GGUF 模型', extensions:['gguf']}]});
 
 async function uploadAudio(blob, name, source = 'loopback-upload') {
   assetStatus.textContent = '正在写入本地音频账本…';
@@ -925,6 +927,12 @@ transcribeButton.addEventListener('click', async () => {
   if (!currentAsset) return;
   const title = document.querySelector('#recordTitle').value.trim();
   if (!title) { processStatus.textContent = '请填写记录标题'; return; }
+  const diarizationExecutable = document.querySelector('#diarizationPath').value.trim();
+  const diarizationModel = document.querySelector('#diarizationModel').value.trim();
+  if (Boolean(diarizationExecutable) !== Boolean(diarizationModel)) {
+    processStatus.textContent = '说话人分离需要同时设置 NeMo-Speech.cpp 程序和本地模型文件；不需要时请清空两项';
+    return;
+  }
   transcribeButton.disabled = true;
   try {
     let job = lastCompletedJob?.assetId === currentAsset.id ? lastCompletedJob : null;
@@ -932,7 +940,7 @@ transcribeButton.addEventListener('click', async () => {
       processStatus.textContent = '已加入本地转写队列…';
       const response = await fetch(`${apiUrl}/transcribe`, {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({asset_id:currentAsset.id, provider:'whisper.cpp', executable:document.querySelector('#whisperPath').value.trim(), model:document.querySelector('#modelPath').value.trim(), ffmpeg_executable:document.querySelector('#ffmpegPath').value.trim() || 'ffmpeg'}),
+        body:JSON.stringify({asset_id:currentAsset.id, provider:'whisper.cpp', executable:document.querySelector('#whisperPath').value.trim(), model:document.querySelector('#modelPath').value.trim(), ffmpeg_executable:document.querySelector('#ffmpegPath').value.trim() || 'ffmpeg', diarization_executable:document.querySelector('#diarizationPath').value.trim(), diarization_model:document.querySelector('#diarizationModel').value.trim()}),
       });
       job = await response.json();
       if (!response.ok) throw new Error(job.error || `HTTP ${response.status}`);

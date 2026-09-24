@@ -167,3 +167,94 @@ def test_local_command_failures_are_actionable_and_keep_unicode_diagnostics(monk
     monkeypatch.setattr("voice_memory.transcription.subprocess.run", failed)
     with pytest.raises(RuntimeError, match="whisper.cpp failed with exit code 1: 无法解码音频格式"):
         _run_local_command(["whisper-cli.exe"], "whisper.cpp")
+
+
+def test_nemo_diarization_adds_only_suggestions_and_detects_real_overlap(tmp_path, monkeypatch):
+    from voice_memory.models import Segment
+    from voice_memory.transcription import NemoSpeechDiarizationProvider, Transcript
+
+    audio = tmp_path / "audio.wav"
+    model = tmp_path / "sortformer.gguf"
+    audio.write_bytes(b"audio")
+    model.write_bytes(b"model placeholder")
+
+    class BaseProvider:
+        name = "fixture-asr"
+
+        def transcribe(self, _audio_path):
+            return Transcript("fixture-asr", "fixture-model", "en", [
+                Segment("seg-1", 0.0, 1.0, "Unknown", "hello there"),
+                Segment("seg-2", 1.0, 2.0, "Unknown", "goodbye"),
+            ])
+
+    def fake_run(command, **_kwargs):
+        assert command[1] == "diarize"
+        assert Path(command[2]).suffix == ".wav"
+        assert command[command.index("--model") + 1] == str(model.resolve())
+        Path(command[command.index("--output") + 1]).write_text(
+            "SPEAKER audio 1 0.00 0.70 <NA> <NA> speaker_1 <NA> <NA>\n"
+            "SPEAKER audio 1 0.50 0.40 <NA> <NA> speaker_2 <NA> <NA>\n"
+            "SPEAKER audio 1 1.10 0.70 <NA> <NA> speaker_2 <NA> <NA>\n",
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", fake_run)
+    result = NemoSpeechDiarizationProvider(BaseProvider(), "nemo-speech", str(model)).transcribe(audio)
+    assert result.provider == "fixture-asr+nemo-speech.cpp"
+    assert result.segments[0].speaker_ids == ["speaker_1", "speaker_2"]
+    assert result.segments[0].speaker == "Speaker 1"
+    assert result.segments[0].overlap is True
+    assert result.segments[0].speaker_status == "suggestion"
+    assert result.segments[1].speaker_ids == ["speaker_2"]
+    assert result.segments[1].overlap is False
+
+
+def test_nemo_diarization_requires_an_existing_local_model(tmp_path, monkeypatch):
+    import pytest
+
+    from voice_memory.transcription import NemoSpeechDiarizationProvider, Transcript
+
+    class BaseProvider:
+        name = "fixture-asr"
+
+        def transcribe(self, _audio_path):
+            return Transcript("fixture-asr", "model", None, [])
+
+    def unexpected_run(*_args, **_kwargs):
+        raise AssertionError("must not invoke a model downloader")
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", unexpected_run)
+    with pytest.raises(RuntimeError, match="automatic model downloads are disabled"):
+        NemoSpeechDiarizationProvider(BaseProvider(), "nemo-speech", str(tmp_path / "missing.gguf")).transcribe("audio.wav")
+
+
+def test_nemo_diarization_normalizes_non_wav_to_temp_wav(tmp_path, monkeypatch):
+    from voice_memory.models import Segment
+    from voice_memory.transcription import NemoSpeechDiarizationProvider, Transcript
+
+    audio = tmp_path / "audio.m4a"
+    model = tmp_path / "sortformer.gguf"
+    audio.write_bytes(b"compressed audio")
+    model.write_bytes(b"model placeholder")
+
+    class BaseProvider:
+        name = "fixture-asr"
+
+        def transcribe(self, _audio_path):
+            return Transcript("fixture-asr", "fixture-model", "en", [Segment("seg-1", 0.0, 1.0, "Unknown", "hello")])
+
+    commands = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        if command[0] == "ffmpeg":
+            Path(command[-1]).write_bytes(b"normalized wav")
+        else:
+            Path(command[command.index("--output") + 1]).write_text("", encoding="utf-8")
+
+    monkeypatch.setattr("voice_memory.transcription.subprocess.run", fake_run)
+    result = NemoSpeechDiarizationProvider(BaseProvider(), "nemo-speech", str(model), source_name="audio.m4a").transcribe(audio)
+    assert commands[0][0] == "ffmpeg"
+    assert commands[0][commands[0].index("-c:a") + 1] == "pcm_s16le"
+    assert Path(commands[1][2]).suffix == ".wav"
+    assert result.segments[0].speaker == "Unknown"

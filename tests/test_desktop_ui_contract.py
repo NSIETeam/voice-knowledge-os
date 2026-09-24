@@ -23,6 +23,9 @@ def test_desktop_javascript_static_selectors_exist_in_html():
     assert ".evidence-link" in styles
     assert 'src="/assets/miraphant.svg"' in html
     assert 'fill="#1B3D32"' in brand_mark
+    assert 'id="diarizationPath"' in html and 'id="diarizationModel"' in html
+    assert "diarization_executable" in javascript and "diarization_model" in javascript
+    assert "automatic model downloads are disabled" in (root / "src/voice_memory/transcription.py").read_text(encoding="utf-8")
     assert "参与此片段的说话人 ID，逗号分隔" in javascript
     assert "type:'set_speakers'" in javascript
 

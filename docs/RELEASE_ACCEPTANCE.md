@@ -2,13 +2,15 @@
 
 ## Current product candidate
 
-The desktop source candidate is `e7d409b`; repository CI/test-harness head is `b645255`.
+The desktop baseline passed in run #57; subsequent product changes are recorded below and must pass their own CI and packaged acceptance before release.
 
 - Desktop shell run [#57 / 35961507456](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35961507456) passed on Windows x64 and Apple Silicon macOS, including packaged install/start/lifecycle checks.
 - CI run [#87 / 35962230804](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35962230804) passed all nine OS/Python matrix jobs after making the preview-diff fixture explicitly CRLF and comparing exact newline bytes.
 - CI runs #85 and #86 failed on Windows because the test used universal-newline reads (`Path.read_text`) against compiler output that intentionally preserves CRLF. This was a test-harness mismatch, not a production compiler defect. The new fixture now exercises CRLF on every host and checks preview against the exact written bytes.
 - CI run [#88 / 35963002789](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35963002789) passed all 11 jobs (two Obsidian-plugin matrix jobs and nine OS/Python smoke jobs) after setting `fail-fast: false`, so Windows failures no longer cancel remaining platform/version evidence.
-- These results do not cover real microphone/device recording, model inference, diarization, identity profiles, or signed public release; see the remaining release gates below.
+- These baseline results do not cover real microphone/device recording, real model inference, diarization accuracy, identity profiles, or signed public release; see the remaining release gates below.
+
+The current working tree adds optional NeMo-Speech.cpp diarization after the existing Whisper transcript. It uses a user-selected local model, normalizes non-WAV source media in a temporary directory, parses RTTM with validation, aligns only acoustic speaker clusters, and persists them as suggestions. Automated tests use a mocked local command; they do not establish real NeMo inference, quality, runtime install, or Windows/macOS model performance.
 
 Previous cross-platform acceptance covered product code `20ff6880d253f3c9330faba310a47952fc6589bd` on `codex/windows-wasapi-capture`.
 
@@ -60,7 +62,7 @@ This is a productization candidate, not a formal public release. CI installation
 
 Issue #6 remains open pending packaged-app interaction acceptance. Source implementation now links current model assertions to transcript segments and audio offsets; stale analysis is hidden after transcript changes.
 
-Actual Whisper and Ollama model runs, speaker diarization and persistent voice identity review, update delivery, Windows code signing, and macOS signing/notarization also remain open. The desktop app writes Markdown and machine-readable sidecars directly into the selected Vault; see `obsidian-plugin/README.md` for its current scope and acceptance boundaries.
+Actual Whisper, NeMo diarization, and Ollama model runs, persistent voice identity review, update delivery, Windows code signing, and macOS signing/notarization also remain open. The optional NeMo adapter requires a user-installed runtime and an existing local model file; it does not download models. The desktop app writes Markdown and machine-readable sidecars directly into the selected Vault; see `obsidian-plugin/README.md` for its current scope and acceptance boundaries.
 
 ## Initial Obsidian plugin implementation
 
