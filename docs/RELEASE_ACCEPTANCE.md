@@ -15,11 +15,18 @@ Previous cross-platform acceptance covered product code `20ff6880d253f3c9330faba
 - A local `aarch64-apple-darwin` `.app` and DMG were built. The installed copy passed the package smoke test: permission-purpose key present, app-owned loopback API started with all seven profiles, and normal quit removed the listener and sidecar.
 - The smoke test originally failed because local `/tmp` resolves through a symlink and Tauri refuses sidecar resolution through that path. Canonicalizing the isolated smoke root fixed the harness; the final DMG install test passed.
 - Verification: Python suite 61/61; Rust macOS library tests 2/2; macOS `cargo check`; frontend production build; Rust formatting; DMG install/start/quit smoke test.
-- The microphone permission prompt and actual microphone recording/save/transcribe flow were deliberately not exercised. No microphone authorization was requested. Windows changes share the capture upload helper; native Windows CI and device checks remain pending for this commit.
+- GitHub desktop workflow [run 35949960645](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35949960645) passed on both macOS 14 / Apple Silicon and Windows x64. This includes Windows capture-adapter Rust tests, Windows MSI installation/start smoke, and the Apple Silicon DMG installation/start/normal-quit smoke.
+- The nine-job Python OS/Python-version matrix passed in [run 35949960681](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35949960681).
+- The microphone permission prompt and actual microphone recording/save/transcribe flow were deliberately not exercised. No microphone authorization was requested. Windows CI validates packaging/lifecycle, not real hardware capture.
 
 Local DMG: `desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Voice Memory_0.1.0_aarch64.dmg`
 
 SHA-256: `468782b43e8311db6ea020bd2d40408af736835d848bc6405ddb14563e6f4f9e`
+
+| GitHub Actions artifact | SHA-256 of artifact ZIP |
+|---|---|
+| `voice-memory-aarch64-apple-darwin` ([run 35949960645](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35949960645)) | `4307cc2887a8ce7f3383cb32f0c930706270732d3c5a47ba5d89b12fbababa3a` |
+| `voice-memory-x86_64-pc-windows-msvc` ([run 35949960645](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35949960645)) | `6adf9863d4f0462eec507b705d72d7738f0feafa81856641b76bc7861bb537c1` |
 
 | Target | Verified in the current desktop run | Artifact | GitHub ZIP SHA-256 |
 |---|---|---|---|
