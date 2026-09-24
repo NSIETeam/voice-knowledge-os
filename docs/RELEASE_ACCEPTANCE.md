@@ -6,6 +6,7 @@ The current branch is `codex/windows-wasapi-capture`, at `cec7315ad98c4d3cdf9500
 
 - The nine-job Python matrix for this commit passed in [CI run 35941684949](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35941684949).
 - Windows x64 and Apple Silicon package, install, startup, and lifecycle checks passed in [Desktop shell run 35941685003](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35941685003).
+- The Apple Silicon DMG from that run was also checksum-verified and installed/launched on this Mac in an isolated temporary home. The UI, local API, seven profiles, sidecar ownership, and clean normal-quit cleanup passed; no microphone permission was requested.
 - The local Python suite passed with 56 tests. `npm run frontend:build` passed. The refreshed interface keeps Miraphant's forest-and-paper palette, improves control legibility, and names missing transcription prerequisites.
 
 | Target | Verified in the current desktop run | Artifact | GitHub ZIP SHA-256 |
