@@ -78,7 +78,17 @@ jobs:
         run: cargo test --release --target ${{ matrix.target }} --locked --manifest-path src-tauri/Cargo.toml
       - name: Build desktop shell
         working-directory: desktop
-        run: npm run build -- --target ${{ matrix.target }}
+        run: npm run build -- --target ${{ matrix.target }} --verbose
+      - name: Preserve macOS bundle diagnostics on failure
+        if: failure() && matrix.os == 'macos-14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-bundle-failure-${{ github.run_id }}
+          path: |
+            desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/**
+            desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/**
+          if-no-files-found: warn
+          include-hidden-files: true
       - name: Write bundle SHA-256 manifests
         working-directory: desktop
         run: python scripts/write_hashes.py src-tauri/target
