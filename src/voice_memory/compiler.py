@@ -13,7 +13,7 @@ from pathlib import Path
 from difflib import unified_diff
 
 from .models import ConversationRecord, PROFILES, validate_record_id, validate_record_title
-from .processing import transcript_fingerprint
+from .processing import analysis_matches_transcript, transcript_fingerprint
 
 
 def _managed(section_id: str, body: str, version: int = 1) -> str:
@@ -231,7 +231,7 @@ def compile_record(
     analysis_current = bool(
         analysis
         and analysis.get("profile") == record.primary_mode
-        and analysis.get("source_transcript_sha256") == transcript_fingerprint(record)
+        and analysis_matches_transcript(record, analysis)
     )
     metadata["semantic_analysis_current"] = analysis_current
     yaml = "\n".join(

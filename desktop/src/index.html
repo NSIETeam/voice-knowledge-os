@@ -87,6 +87,11 @@
                 <div class="review-toolbar"><label for="reviewRecordId" class="sr-only">记录 ID</label><input id="reviewRecordId" class="text-input" placeholder="粘贴记录 ID" autocomplete="off" /><button id="loadReview" class="button button-outline" type="button">加载记录</button><button id="saveReview" class="button button-primary" type="button" disabled>保存修改</button><button id="reanalyze" class="button button-outline" type="button" disabled>用本机模型重新整理</button></div>
                 <div class="review-actions"><div><button id="undoReview" class="button button-outline" type="button" disabled>撤销</button><button id="redoReview" class="button button-outline" type="button" disabled>重做</button><button id="mergeSelected" class="button button-outline" type="button" disabled>合并选中片段</button></div><span id="reviewSelectionCount">选择两个相邻、同一说话人的片段进行合并</span></div>
                 <p id="reviewStatus" class="asset-status" aria-live="polite">未加载记录</p>
+                <section id="reviewAssertions" class="review-assertions" hidden aria-label="模型整理与原文证据">
+                  <div class="assertions-heading"><div><span class="panel-kicker">MODEL NOTES · VERIFY AGAINST SOURCE</span><h3>整理候选</h3></div><span class="candidate-label">待复核</span></div>
+                  <p id="reviewAssertionsHint" class="assertions-hint"></p>
+                  <div id="reviewAssertionsList" class="assertions-list"></div>
+                </section>
                 <audio id="reviewAudio" controls preload="metadata" hidden></audio>
                 <div id="reviewTimeline" class="review-timeline" hidden aria-label="录音片段时间线"><div id="reviewRuler" class="review-ruler"></div><div id="reviewTracks" class="review-tracks"></div></div>
                 <div id="reviewSegments" class="review-segments"></div>

@@ -35,6 +35,13 @@ def transcript_fingerprint(record: ConversationRecord) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def analysis_matches_transcript(record: ConversationRecord, analysis: dict[str, Any] | None) -> bool:
+    return bool(
+        isinstance(analysis, dict)
+        and analysis.get("source_transcript_sha256") == transcript_fingerprint(record)
+    )
+
+
 def _is_loopback_endpoint(endpoint: str) -> str:
     try:
         parsed = urllib.parse.urlsplit(endpoint)

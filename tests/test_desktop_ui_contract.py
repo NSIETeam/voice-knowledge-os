@@ -12,3 +12,7 @@ def test_desktop_javascript_static_selectors_exist_in_html():
 
     assert selected_ids <= html_ids, f"missing desktop controls: {sorted(selected_ids - html_ids)}"
     assert re.search(r"\[hidden\]\s*\{[^}]*display\s*:\s*none\s*!important", styles)
+    assert "analysis_views_current" in javascript
+    assert "jumpToEvidence" in javascript
+    assert "reviewAssertionsList" in html
+    assert ".evidence-link" in styles

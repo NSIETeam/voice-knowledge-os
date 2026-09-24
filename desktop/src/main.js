@@ -407,6 +407,7 @@ document.querySelector('#record').addEventListener('click', async (event) => {
 });
 
 let reviewRecord;
+let reviewSidecar = null;
 let reviewHistory = [];
 let reviewPlaybackEnd = null;
 const reviewStatus = document.querySelector('#reviewStatus');
@@ -421,6 +422,9 @@ const undoReview = document.querySelector('#undoReview');
 const redoReview = document.querySelector('#redoReview');
 const mergeSelected = document.querySelector('#mergeSelected');
 const reviewSelectionCount = document.querySelector('#reviewSelectionCount');
+const reviewAssertions = document.querySelector('#reviewAssertions');
+const reviewAssertionsHint = document.querySelector('#reviewAssertionsHint');
+const reviewAssertionsList = document.querySelector('#reviewAssertionsList');
 
 function syncReviewHistoryControls() {
   undoReview.disabled = !reviewHistory.some(item => (item.kind || 'change') === 'change' && item.active !== false);
@@ -583,6 +587,81 @@ function renderReview(record) {
   renderTimeline();
   syncReviewHistoryControls();
   updateMergeSelection();
+  renderAssertions();
+}
+
+function appendSafeText(parent, tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  node.textContent = text;
+  parent.append(node);
+  return node;
+}
+
+function renderAssertions() {
+  reviewAssertionsList.replaceChildren();
+  const pending = hasPendingReviewEdits();
+  const views = reviewSidecar?.analysis_views || {};
+  const current = reviewSidecar?.analysis_views_current || {};
+  const currentViews = Object.entries(views).filter(([profile, analysis]) => current[profile] && analysis);
+  if (!reviewRecord || !currentViews.length) {
+    reviewAssertions.hidden = true;
+    return;
+  }
+  reviewAssertions.hidden = false;
+  reviewAssertionsHint.textContent = pending
+    ? '当前有未保存的转写或说话人修改。保存后重新整理，才能确认这些候选仍对应原文。'
+    : '每条内容都可跳回原文时间点；候选属于模型建议，不代表已确认事实。';
+  if (pending) return;
+  for (const [profile, analysis] of currentViews) {
+    const view = document.createElement('div');
+    view.className = 'assertion-view';
+    appendSafeText(view, 'h4', 'assertion-profile', profile);
+    const summary = analysis.summary;
+    if (summary?.text) {
+      const summaryCard = document.createElement('article');
+      summaryCard.className = 'assertion-card';
+      appendSafeText(summaryCard, 'p', 'assertion-text', summary.text);
+      appendEvidenceLinks(summaryCard, summary.evidence_ids);
+      view.append(summaryCard);
+    }
+    for (const finding of analysis.findings || []) {
+      const card = document.createElement('article');
+      card.className = 'assertion-card';
+      if (finding.kind) appendSafeText(card, 'span', 'assertion-kind', String(finding.kind));
+      appendSafeText(card, 'p', 'assertion-text', finding.text || '未命名候选');
+      appendEvidenceLinks(card, finding.evidence_ids);
+      view.append(card);
+    }
+    reviewAssertionsList.append(view);
+  }
+}
+
+function appendEvidenceLinks(parent, ids = []) {
+  const evidence = document.createElement('div');
+  evidence.className = 'assertion-evidence';
+  for (const id of ids || []) {
+    const segment = reviewRecord.segments.find(item => item.id === id);
+    if (!segment) continue;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'evidence-link';
+    button.textContent = `↗ ${formatTime(segment.start)} · ${segment.speaker || '未知说话人'}`;
+    button.addEventListener('click', () => jumpToEvidence(segment));
+    evidence.append(button);
+  }
+  if (evidence.childElementCount) parent.append(evidence);
+}
+
+function jumpToEvidence(segment) {
+  const article = [...reviewSegments.querySelectorAll('.review-segment')]
+    .find(item => item.dataset.segmentId === segment.id);
+  article?.scrollIntoView({behavior: 'smooth', block: 'center'});
+  article?.classList.add('evidence-target');
+  article?.querySelector('textarea')?.focus({preventScroll: true});
+  window.setTimeout(() => article?.classList.remove('evidence-target'), 1800);
+  reviewStatus.textContent = `原文证据：${formatTime(segment.start)} · ${segment.speaker || '未知说话人'}`;
+  seekAndPlay(segment.start, segment.end);
 }
 
 function selectedReviewSegments() {
@@ -628,6 +707,7 @@ async function postReviewCorrection(operation, successMessage) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     reviewRecord = result.record;
+    reviewSidecar = null;
     reviewHistory = result.correction_history || reviewHistory;
     renderReview(reviewRecord);
     reviewStatus.textContent = successMessage;
@@ -641,12 +721,13 @@ document.querySelector('#loadReview').addEventListener('click', async () => {
     const response = await fetch(`${apiUrl}/records/${encodeURIComponent(id)}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const sidecar = await response.json();
+    reviewSidecar = sidecar;
     reviewRecord = sidecar.record;
     reviewHistory = sidecar.correction_history || [];
     document.querySelector('#profile').value = reviewRecord.primary_mode;
     renderReview(reviewRecord);
     reviewStatus.textContent = `已加载 ${reviewRecord.title}，历史修正 ${sidecar.correction_history?.length || 0} 次`;
-  } catch (error) { reviewStatus.textContent = `加载失败：${error.message}`; reviewSegments.replaceChildren(); reviewTimeline.hidden = true; reviewAudio.hidden = true; saveReview.disabled = true; reviewHistory = []; syncReviewHistoryControls(); }
+  } catch (error) { reviewSidecar = null; reviewAssertions.hidden = true; reviewStatus.textContent = `加载失败：${error.message}`; reviewSegments.replaceChildren(); reviewTimeline.hidden = true; reviewAudio.hidden = true; saveReview.disabled = true; reviewHistory = []; syncReviewHistoryControls(); }
 });
 
 undoReview.addEventListener('click', () => postReviewCorrection({type:'undo'}, '已撤销最近一次复核修改'));
@@ -677,6 +758,7 @@ reanalyzeButton.addEventListener('click', async () => {
     const refreshed = await fetch(`${apiUrl}/records/${encodeURIComponent(reviewRecord.id)}`);
     if (!refreshed.ok) throw new Error(`刷新记录失败：HTTP ${refreshed.status}`);
     const sidecar = await refreshed.json();
+    reviewSidecar = sidecar;
     reviewRecord = sidecar.record;
     document.querySelector('#profile').value = selectedProfile;
     renderReview(reviewRecord);
@@ -686,6 +768,9 @@ reanalyzeButton.addEventListener('click', async () => {
     reanalyzeButton.disabled = !reviewRecord || !document.querySelector('#ollamaModel').value.trim();
   }
 });
+
+reviewSegments.addEventListener('input', renderAssertions);
+reviewSegments.addEventListener('change', renderAssertions);
 
 transcribeButton.addEventListener('click', async () => {
   if (!currentAsset) return;

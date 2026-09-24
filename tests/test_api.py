@@ -263,6 +263,7 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
 
         semantic_sidecar = json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))
         assert semantic_sidecar["analysis"]["model"] == "fixture-model"
+        assert semantic_sidecar["analysis_views_current"]["knowledge"] is True
         semantic_correction_request = urllib.request.Request(
             f"{base}/records/{semantic_record['record_id']}/corrections",
             data=json.dumps({"type": "edit_text", "segment_id": "seg-1", "text": "语义记录的人工校正"}).encode(),
@@ -276,6 +277,7 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
         assert "有证据支持的本机候选总结" not in semantic_markdown
         corrected_sidecar = json.load(urllib.request.urlopen(f"{base}/records/{semantic_record['record_id']}"))
         assert corrected_sidecar["analysis"]["summary"]["text"] == "有证据支持的本机候选总结"
+        assert corrected_sidecar["analysis_views_current"]["knowledge"] is False
         reprocess_request = urllib.request.Request(
             f"{base}/records/{semantic_record['record_id']}/reprocess",
             data=json.dumps({

@@ -566,3 +566,28 @@ body { font-size: 15px; }
   .review-meta .segment-time input { width: 63px; }
   .review-flags { width: 100%; margin-left: 0; }
 }
+
+/* Review Studio: distinguish model candidates from verified source evidence. */
+.review-assertions { margin: 20px 0 18px; padding: 18px; background: #f3f4ec; border: 1px solid #dfe5d7; border-left: 3px solid #78906d; border-radius: 11px; }
+.assertions-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.assertions-heading h3 { margin: 5px 0 0; color: #263d30; font-size: 16px; letter-spacing: -.025em; }
+.candidate-label { padding: 5px 9px; color: #80623b; background: #f5eddc; border: 1px solid #e9dcc1; border-radius: 99px; font-size: 10px; font-weight: 650; }
+.assertions-hint { margin: 11px 0 0; color: #718073; font-size: 11px; line-height: 1.65; }
+.assertions-list { display: grid; gap: 16px; margin-top: 12px; }
+.assertion-view { display: grid; gap: 8px; }
+.assertion-profile { margin: 0; color: #6d7f69; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.assertion-card { padding: 12px 14px; background: #fffefa; border: 1px solid #e4e7de; border-radius: 9px; }
+.assertion-kind { color: #6c8067; font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.assertion-text { margin: 5px 0 9px; color: #33453a; font-size: 13px; line-height: 1.7; }
+.assertion-evidence { display: flex; flex-wrap: wrap; gap: 7px; }
+.evidence-link { min-height: 32px; padding: 0 10px; color: #345b40; background: #edf2e8; border: 1px solid #d9e3d2; border-radius: 7px; font-size: 10px; font-weight: 600; }
+.evidence-link:hover { color: #19382f; background: #e1eadb; border-color: #bdcdb5; }
+.review-segment { scroll-margin-top: 92px; transition: background-color .2s ease, box-shadow .2s ease; }
+.review-segment.evidence-target { padding-inline: 12px; background: #f0f4e9; box-shadow: inset 3px 0 #78906d; border-radius: 6px; }
+.review-segment textarea, .review-meta input, .review-meta select { font-size: 13px; }
+.review-toolbar .button, .review-actions .button, .review-controls .button { font-size: 11px; }
+@media (max-width: 560px) {
+  .review-assertions { padding: 14px; }
+  .assertions-heading h3 { font-size: 15px; }
+  .assertion-summary, .assertion-text { font-size: 12px; }
+}

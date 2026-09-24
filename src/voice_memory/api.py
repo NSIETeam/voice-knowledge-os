@@ -23,7 +23,7 @@ from .jobs import JobStore
 from .models import ConversationRecord, PROFILES, Segment, validate_record_title
 from .transcription import FixtureProvider, WhisperCppProvider
 from .review import apply_correction
-from .processing import LocalOllamaProcessor
+from .processing import LocalOllamaProcessor, analysis_matches_transcript
 
 
 INDEX_HTML = """<!doctype html>
@@ -182,6 +182,25 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
                 sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
                 if sidecar.get("record_id") != record_id:
                     raise FileNotFoundError(record_id)
+                record_data = sidecar.get("record")
+                views = sidecar.get("analysis_views") or {}
+                if not views and isinstance(sidecar.get("analysis"), dict):
+                    legacy = sidecar["analysis"]
+                    legacy_profile = legacy.get("profile") or (record_data or {}).get("primary_mode")
+                    if legacy_profile:
+                        views = {legacy_profile: legacy}
+                try:
+                    record = ConversationRecord(
+                        **{key: value for key, value in record_data.items() if key != "segments"},
+                        segments=[Segment(**segment) for segment in record_data.get("segments", [])],
+                    )
+                    sidecar["analysis_views_current"] = {
+                        profile: bool(view.get("profile") == profile and analysis_matches_transcript(record, view))
+                        for profile, view in views.items()
+                        if isinstance(view, dict)
+                    }
+                except (AttributeError, TypeError, ValueError):
+                    sidecar["analysis_views_current"] = {}
                 self._json(HTTPStatus.OK, sidecar)
             except FileNotFoundError:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "record_not_found"})
