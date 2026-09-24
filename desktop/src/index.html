@@ -16,6 +16,7 @@
         <div class="side-label">工作区</div>
         <nav class="side-nav">
           <a class="nav-link active" href="#capture"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="2"/></svg>新建记录<span class="nav-arrow">↗</span></a>
+          <a class="nav-link" href="#library"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4.5h12v11H4z"/><path d="M7 7.5h6M7 10h6M7 12.5h4"/></svg>最近记录</a>
           <a class="nav-link" href="#review"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h7l3 3v10H5z"/><path d="M12 3.5v3h3M7.5 10h5M7.5 13h5"/></svg>证据复核</a>
           <a class="nav-link" href="#settings"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 6h13M3.5 14h13"/><circle cx="8" cy="6" r="1.7"/><circle cx="12" cy="14" r="1.7"/></svg>本地设置</a>
         </nav>
@@ -106,7 +107,12 @@
               </dialog>
             </div>
 
-            <aside class="secondary-column" aria-label="本机状态与设置">
+            <aside class="secondary-column" aria-label="最近记录、本机状态与设置">
+              <section id="library" class="library-panel" aria-labelledby="libraryTitle">
+                <div class="library-heading"><div><span class="panel-kicker">你的本机资料</span><h2 id="libraryTitle">最近记录</h2></div><button id="refreshRecords" class="text-button library-refresh" type="button" aria-label="刷新最近记录">刷新 ↻</button></div>
+                <label class="sr-only" for="recordSearch">搜索本机记录</label><input id="recordSearch" class="text-input library-search" type="search" placeholder="搜索标题或处理模式" autocomplete="off" />
+                <div id="recordList" class="record-list" aria-live="polite"><p class="library-empty">正在读取本机记录…</p></div>
+              </section>
               <section class="status-panel">
                 <div class="status-topline"><span class="panel-kicker">本机工作状态</span><span class="status-orbit" aria-hidden="true"><i></i></span></div>
                 <h2>你的声音，<br /><em>始终由你掌握。</em></h2>

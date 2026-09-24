@@ -16,6 +16,8 @@ def test_desktop_javascript_static_selectors_exist_in_html():
     assert "analysis_views_current" in javascript
     assert "jumpToEvidence" in javascript
     assert "reviewAssertionsList" in html
+    assert 'id="library"' in html and 'id="recordList"' in html
+    assert "refreshRecentRecords" in javascript and "${apiUrl}/records" in javascript
     assert 'id="reprocessDialog"' in html and 'id="approveReprocess"' in html
     assert "reprocess/approve" in javascript and "reprocess/cancel" in javascript
     assert ".evidence-link" in styles

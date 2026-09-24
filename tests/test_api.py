@@ -4,6 +4,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
+from urllib.parse import quote
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import pytest
@@ -246,6 +247,11 @@ def test_uploaded_audio_can_be_transcribed_and_compiled_from_job(tmp_path, monke
         assert "本地转写内容" in markdown
         record = json.load(urllib.request.urlopen(f"{base}/records/{compiled['record_id']}"))
         assert record["record"]["audio_asset_id"] == asset["id"]
+        library = json.load(urllib.request.urlopen(f"{base}/records?q={quote('本地测试')}"))
+        assert library["total"] == 1
+        assert library["records"][0]["id"] == compiled["record_id"]
+        assert library["records"][0]["segment_count"] == 1
+        assert json.load(urllib.request.urlopen(f"{base}/records?q={quote('不存在')}"))["total"] == 0
         correction_request = urllib.request.Request(
             f"{base}/records/{compiled['record_id']}/corrections",
             data=json.dumps({"type":"edit_text", "segment_id":"seg-1", "text":"人工复核内容"}).encode(),

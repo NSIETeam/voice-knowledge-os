@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 import base64
 import errno
 import hashlib
@@ -120,7 +120,52 @@ class VoiceMemoryHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self._reject_untrusted_origin():
             return
-        if self.path == "/":
+        if urlsplit(self.path).path == "/records":
+            try:
+                index_path = self.data_root / "record-index.json"
+                index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+                if not isinstance(index, dict):
+                    raise ValueError("record index must be a JSON object")
+                query = parse_qs(urlsplit(self.path).query).get("q", [""])[0].strip().casefold()
+                records = []
+                for record_id, indexed_path in index.items():
+                    if not isinstance(record_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", record_id):
+                        continue
+                    if not isinstance(indexed_path, str):
+                        continue
+                    sidecar_path = Path(indexed_path).resolve()
+                    if (
+                        sidecar_path.name != f"{record_id}.json"
+                        or sidecar_path.parent.name != "recordings"
+                        or sidecar_path.parent.parent.name != ".voice-memory"
+                        or not sidecar_path.is_file()
+                    ):
+                        continue
+                    try:
+                        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                        record = sidecar.get("record")
+                        if sidecar.get("record_id") != record_id or not isinstance(record, dict):
+                            continue
+                        title = str(record.get("title", ""))
+                        profile = str(record.get("primary_mode", ""))
+                        created_at = str(record.get("created_at", ""))
+                        if query and query not in f"{title} {profile}".casefold():
+                            continue
+                        records.append({
+                            "id": record_id,
+                            "title": title,
+                            "created_at": created_at,
+                            "primary_mode": profile,
+                            "segment_count": len(record.get("segments", [])) if isinstance(record.get("segments"), list) else 0,
+                            "audio_asset_id": record.get("audio_asset_id"),
+                        })
+                    except (OSError, json.JSONDecodeError):
+                        continue
+                records.sort(key=lambda item: item["created_at"], reverse=True)
+                self._json(HTTPStatus.OK, {"records": records[:100], "total": len(records)})
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"record_index_unavailable: {error}"})
+        elif self.path == "/":
             body = INDEX_HTML.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")

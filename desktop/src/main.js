@@ -41,6 +41,84 @@ profileSelect.addEventListener('change', () => {
 });
 document.querySelector('#todayDate').textContent = new Intl.DateTimeFormat('zh-CN', {dateStyle:'medium'}).format(new Date()).toUpperCase();
 
+let recentRecords = [];
+let recordsRequestPending = false;
+let recordsRequestAttempted = false;
+const profileNames = {
+  knowledge:'知识学习', decision:'方案与决策', interview:'访谈与调研',
+  negotiation:'商务谈判', relationship:'关系与日常对话', evidence:'记录与证据', operations:'会议与运营',
+};
+const recordList = document.querySelector('#recordList');
+const recordSearch = document.querySelector('#recordSearch');
+
+function renderRecentRecords() {
+  const query = recordSearch.value.trim().toLocaleLowerCase();
+  const filtered = recentRecords.filter(record =>
+    `${record.title} ${profileNames[record.primary_mode] || record.primary_mode}`.toLocaleLowerCase().includes(query));
+  recordList.replaceChildren();
+  if (!filtered.length) {
+    const empty = document.createElement('p');
+    empty.className = 'library-empty';
+    empty.textContent = recentRecords.length ? '没有匹配的记录。' : '这里还没有记录。录音或导入并完成转写后，会自动出现在这里。';
+    recordList.append(empty);
+    return;
+  }
+  for (const record of filtered.slice(0, 12)) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'record-row';
+    const title = document.createElement('strong');
+    title.textContent = record.title || '未命名记录';
+    const meta = document.createElement('span');
+    const date = record.created_at ? new Date(record.created_at).toLocaleDateString('zh-CN') : '日期未知';
+    meta.textContent = `${date} · ${profileNames[record.primary_mode] || record.primary_mode} · ${record.segment_count} 段`;
+    button.append(title, meta);
+    button.addEventListener('click', () => {
+      document.querySelector('#reviewRecordId').value = record.id;
+      document.querySelector('#loadReview').click();
+      document.querySelector('#review').scrollIntoView({behavior:'smooth', block:'start'});
+      document.querySelector('.nav-link[href="#review"]').classList.add('active');
+      document.querySelectorAll('.nav-link:not([href="#review"])').forEach(link => link.classList.remove('active'));
+      document.querySelector('.breadcrumb strong').textContent = '证据复核';
+    });
+    recordList.append(button);
+  }
+}
+
+async function refreshRecentRecords() {
+  if (recordsRequestPending) return;
+  recordsRequestPending = true;
+  recordsRequestAttempted = true;
+  recordList.replaceChildren();
+  const loading = document.createElement('p');
+  loading.className = 'library-empty';
+  loading.textContent = '正在读取本机记录…';
+  recordList.append(loading);
+  try {
+    const response = await fetch(`${apiUrl}/records`);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    recentRecords = result.records || [];
+    renderRecentRecords();
+  } catch (error) {
+    recordList.replaceChildren();
+    const failed = document.createElement('p');
+    failed.className = 'library-empty library-error';
+    failed.textContent = `无法读取最近记录：${error.message}`;
+    recordList.append(failed);
+  } finally {
+    recordsRequestPending = false;
+  }
+}
+
+recordSearch.addEventListener('input', renderRecentRecords);
+document.querySelector('#refreshRecords').addEventListener('click', refreshRecentRecords);
+document.querySelectorAll('.nav-link').forEach(link => link.addEventListener('click', () => {
+  document.querySelectorAll('.nav-link').forEach(item => item.classList.toggle('active', item === link));
+  const pageName = {'#capture':'新建记录', '#library':'最近记录', '#review':'证据复核', '#settings':'本地设置'}[link.hash];
+  if (pageName) document.querySelector('.breadcrumb strong').textContent = pageName;
+}));
+
 function refreshActions() {
   const missing = [];
   if (!currentAsset) missing.push('先录音或导入音频');
@@ -293,6 +371,7 @@ async function check() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     status.className = 'ok';
     status.textContent = '本地处理节点正常';
+    void refreshRecentRecords();
     return true;
   } catch (error) {
     status.className = 'warn';
@@ -301,6 +380,7 @@ async function check() {
       : isTauri()
       ? '本地处理节点尚未就绪，请点击“重新检查”重试'
       : '本地处理节点未启动，请先运行 voice-memory serve';
+    if (!recordsRequestAttempted) void refreshRecentRecords();
     return false;
   } finally {
     clearTimeout(timeout);
@@ -867,6 +947,7 @@ transcribeButton.addEventListener('click', async () => {
     });
     const result = await compile.json();
     if (!compile.ok) throw new Error(result.error || `HTTP ${compile.status}`);
+    void refreshRecentRecords();
     document.querySelector('#reviewRecordId').value = result.record_id;
     await document.querySelector('#loadReview').click();
     lastCompletedJob = null;
