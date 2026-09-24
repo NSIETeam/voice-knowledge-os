@@ -215,6 +215,10 @@ h1 em, .status-panel h2 em { color: #748c71; font-style: normal; }
 .sidebar-version { padding: 0 2px; color: #a4aba1; font-size: 7px; letter-spacing: .13em; }
 .sidebar-version span { margin: 0 4px; color: #c2c8bb; }
 
+/* Use the original Miraphant compound mark rather than a retyped monogram. */
+.brand-mark { display: block; width: 48px; height: 28px; flex: 0 0 48px; object-fit: contain; filter: brightness(0) invert(1); }
+.brand-mark-core, .brand-mark i { display: none; }
+
 @media (min-width: 1450px) {
   .content-wrap { padding-top: 53px; }
   .panel { padding: 25px 26px 21px; }
@@ -557,6 +561,7 @@ body { font-size: 15px; }
 .review-controls .button { min-height: 32px; padding: 0 10px; font-size: 10px; }
 .review-flags { display: flex; align-items: center; gap: 9px; margin-left: auto; color: #647369; font-size: 10px; }
 .review-flags input { accent-color: var(--forest); }
+.brand-mark { width: 42px; height: 24px; flex-basis: 42px; }
 @media (max-width: 560px) {
   .review-actions { align-items: flex-start; flex-direction: column; }
   .review-actions > span { text-align: left; }

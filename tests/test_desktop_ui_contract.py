@@ -7,6 +7,7 @@ def test_desktop_javascript_static_selectors_exist_in_html():
     html = (root / "desktop/src/index.html").read_text(encoding="utf-8")
     javascript = (root / "desktop/src/main.js").read_text(encoding="utf-8")
     styles = (root / "desktop/src/styles.css").read_text(encoding="utf-8")
+    brand_mark = (root / "desktop/src/assets/miraphant.svg").read_text(encoding="utf-8")
     html_ids = set(re.findall(r'\bid="([^"]+)"', html))
     selected_ids = set(re.findall(r"querySelector\('#([^']+)'\)", javascript))
 
@@ -16,3 +17,5 @@ def test_desktop_javascript_static_selectors_exist_in_html():
     assert "jumpToEvidence" in javascript
     assert "reviewAssertionsList" in html
     assert ".evidence-link" in styles
+    assert 'src="/assets/miraphant.svg"' in html
+    assert 'fill="#1B3D32"' in brand_mark

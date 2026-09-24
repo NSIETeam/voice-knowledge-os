@@ -52,3 +52,11 @@ This is a productization candidate, not a formal public release. CI installation
 Issue #6 remains open: assertions do not yet navigate to transcript evidence from the claim UI.
 
 Actual Whisper and Ollama model runs, speaker diarization and voice identity review, a native Obsidian plugin, update delivery, Windows code signing, and macOS signing/notarization also remain open. The current app writes Markdown and machine-readable sidecars directly into the selected Vault; that is not a native Obsidian plugin integration.
+
+## Review Studio evidence navigation (`a105d23`)
+
+- Current analysis views are exposed to the desktop UI only when their source transcript fingerprint matches the current record. Stale views remain in the sidecar for provenance but are not presented as current candidates.
+- Model summaries and findings link to the cited transcript segments. Selecting evidence scrolls to and highlights the source segment and seeks/plays its audio range.
+- Unsaved edits suspend candidate display with a clear stale-evidence explanation. This implementation does not itself close Issue #6: validate the interaction in the packaged app and retain the remaining platform/device acceptance gates.
+- Python suite: 61 passed. Frontend production build passed. Python GitHub matrix run `35951532425` passed; desktop workflow `35951532459` passed on Apple Silicon macOS while Windows x64 packaging/acceptance was still running at documentation time.
+- The Miraphant compound logo asset is now used by the desktop UI. The deep-green identity color is `#1B3D32`; logo artwork was sourced from the local Miraphant brand asset already available in the user's workspace.
