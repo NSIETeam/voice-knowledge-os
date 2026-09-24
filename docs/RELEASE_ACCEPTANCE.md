@@ -2,6 +2,14 @@
 
 ## Current product candidate
 
+The desktop source candidate is `e7d409b`; repository CI/test-harness head is `b645255`.
+
+- Desktop shell run [#57 / 35961507456](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35961507456) passed on Windows x64 and Apple Silicon macOS, including packaged install/start/lifecycle checks.
+- CI run [#87 / 35962230804](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35962230804) passed all nine OS/Python matrix jobs after making the preview-diff fixture explicitly CRLF and comparing exact newline bytes.
+- CI runs #85 and #86 failed on Windows because the test used universal-newline reads (`Path.read_text`) against compiler output that intentionally preserves CRLF. This was a test-harness mismatch, not a production compiler defect. The new fixture now exercises CRLF on every host and checks preview against the exact written bytes.
+- CI run [#88 / 35963002789](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35963002789) passed all 11 jobs (two Obsidian-plugin matrix jobs and nine OS/Python smoke jobs) after setting `fail-fast: false`, so Windows failures no longer cancel remaining platform/version evidence.
+- These results do not cover real microphone/device recording, model inference, diarization, identity profiles, or signed public release; see the remaining release gates below.
+
 Previous cross-platform acceptance covered product code `20ff6880d253f3c9330faba310a47952fc6589bd` on `codex/windows-wasapi-capture`.
 
 - The cross-platform Python matrix passed in [CI run 35946632805](https://github.com/NSIETeam/voice-knowledge-os/actions/runs/35946632805); all nine OS/Python jobs succeeded.

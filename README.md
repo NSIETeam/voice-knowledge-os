@@ -10,7 +10,7 @@ The product is intentionally split into replaceable layers:
 
 `Capture → Audio Ledger → ASR/Diarization → Human Review → Semantic Compiler → Obsidian → Execution adapters`
 
-The repository includes local whisper.cpp transcription and an optional Ollama semantic-processor adapter. It does not bundle either model runtime or model weights, and speaker diarization/voice identity are not yet implemented.
+The repository includes local whisper.cpp transcription and an optional Ollama semantic-processor adapter. It does not bundle either model runtime or model weights. Speaker diarization and persistent voice identity remain unimplemented; current speaker labels are reviewable but are not model-generated identities.
 
 The local API and content-addressed audio ledger are now included. Start the API with `PYTHONPATH=src python -m voice_memory.cli serve .voice-memory`; it exposes a local status page, `GET /health`, `GET /profiles`, `GET /jobs/<id>`, `GET /records/<id>`, `POST /ledger/import`, streaming `POST /ledger/upload`, asynchronous `POST /transcribe`, `POST /records/from-job`, `POST /records/<id>/corrections`, `POST /records/<id>/reprocess`, `POST /records/<id>/reprocess/approve`, `POST /records/<id>/reprocess/cancel`, and `POST /records/compile`. Reprocessing first returns a read-only preview containing every affected Markdown diff. It does not write until the user explicitly approves; approval is rejected if the sidecar or any affected note changed after preview. Reprocessing with another profile creates an independent Markdown view under `Recordings/Views/<record-id>/` and preserves the record's original profile and prior analyses. The desktop shell captures or imports audio and sends it only to the loopback ledger, then starts a persisted local transcription job and compiles the completed transcript into a user-selected Vault. On Apple Silicon macOS, microphone input uses native CoreAudio capture and the app declares a microphone purpose string; on Windows, microphone capture uses the WebView and the desktop source also provides WASAPI loopback capture of the default output as a separate asset. Both platforms still need real-device save/transcribe acceptance. Apple Silicon macOS native system-audio capture remains open. The API binds to loopback by default and stores imported bytes under a hash-addressed object path. Production ASR providers implement the same interface; the local `whisper.cpp` subprocess adapter never receives or logs API keys.
 
@@ -21,6 +21,10 @@ The desktop shell now includes a local Review Studio. Load a compiled record by 
 The first compile also creates `.voice-memory/transcripts/<record-id>.json` with schema `voice-memory.transcript.v1`. It is write-once source ASR output, separate from corrected record sidecars and correction events; review corrections never replace this baseline transcript.
 
 The design is informed by open-source projects including [Humla](https://github.com/michaelwilhelmsen/humla) (MIT, local two-stream capture and speaker processing) and [VaultScribe](https://github.com/Junyi-Tang/vaultscribe) (Chinese/English transcription, diarization, and Obsidian export). Their licenses and upstream boundaries must be preserved when adapters are added.
+
+## Desktop record library
+
+The sidebar's recent-record list reads `GET /records`; it includes locally indexed compiled records and supports title/profile filtering with the optional `q` parameter. Selecting a record loads its ID into the Review Studio. It does not list audio imports that have not yet completed transcription and compilation.
 
 ## Run the first slice
 
