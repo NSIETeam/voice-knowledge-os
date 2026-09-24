@@ -281,3 +281,92 @@ h1 em, .status-panel h2 em { color: #748c71; font-style: normal; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+/* Product usability pass: keep Miraphant's forest-and-paper palette, but make
+   the workflow legible at normal desktop viewing distance. */
+body { font-size: 15px; }
+.sidebar { width: 252px; padding: 30px 19px 20px; }
+.main-area { margin-left: 252px; }
+.brand-type strong { font-size: 15px; }
+.brand-type small { font-size: 9px; }
+.side-label { font-size: 11px; }
+.nav-link { min-height: 47px; font-size: 13px; }
+.flow-step strong { font-size: 12px; }
+.flow-step small, .sidebar-foot { font-size: 10px; }
+.topbar { height: 66px; }
+.breadcrumb { font-size: 12px; }
+.local-pill { font-size: 10px; }
+.content-wrap { max-width: 1440px; padding-top: 48px; }
+.eyebrow { font-size: 11px; }
+.intro-copy > p { font-size: 13px; }
+.workspace-grid { grid-template-columns: minmax(0, 1.8fr) minmax(270px, .78fr); gap: 20px; }
+.primary-column, .secondary-column { gap: 18px; }
+.panel { padding: 26px 27px 22px; border-radius: 13px; }
+.step-index { flex-basis: 36px; width: 36px; height: 36px; font-size: 11px; }
+.panel-kicker { font-size: 10px; }
+.panel h2 { font-size: 18px; }
+.panel-tag { font-size: 10px; }
+.capture-status { font-size: 13px; }
+.record-button, .system-button { min-height: 74px; }
+.record-label { font-size: 14px; }
+.record-hint, .system-button { font-size: 12px; }
+.system-audio-status, .or-divider { font-size: 10px; }
+.dropzone { min-height: 64px; }
+.drop-copy strong { font-size: 12px; }
+.drop-copy small, .browse-label { font-size: 10px; }
+.button { min-height: 42px; padding: 0 15px; border-radius: 6px; font-size: 12px; }
+.asset-status { font-size: 11px; }
+.input-label { font-size: 12px; }
+.text-input { height: 44px; padding: 0 12px; font-size: 13px; }
+.input-help { font-size: 10px; }
+.profile-note { min-height: 65px; font-size: 10px; }
+.transcribe-row { margin-top: 21px; padding-top: 18px; }
+.process-status { font-size: 11px; }
+.transcribe-row .button { min-height: 47px; padding: 0 18px; }
+.review-intro { font-size: 12px; }
+.review-toolbar { gap: 9px; }
+.review-meta .badge { font-size: 10px; }
+.review-segment textarea { min-height: 88px; font-size: 13px; }
+.status-panel { padding: 24px 22px 19px; border-radius: 12px; }
+.status-panel .panel-kicker { font-size: 10px; }
+.status-panel h2 { font-size: 20px; }
+.engine-status { font-size: 12px; }
+.text-button, .status-fact, .status-fact strong { font-size: 10px; }
+.settings-panel { padding: 19px; border-radius: 11px; }
+.settings-heading h3 { font-size: 13px; }
+.settings-heading p, .setup-details summary { font-size: 11px; }
+.setup-body > p:first-child, .setup-footnote { font-size: 10px; }
+.setup-body .input-label { font-size: 10px; }
+.setup-body .text-input { height: 37px; font-size: 11px; }
+.setup-body .button { min-height: 37px; font-size: 10px; }
+.privacy-card strong { font-size: 12px; }
+.privacy-card p { font-size: 10px; }
+.sidebar-version { font-size: 8px; }
+
+@media (max-width: 1120px) {
+  .sidebar { width: 215px; }
+  .main-area { margin-left: 215px; }
+  .workspace-grid { grid-template-columns: minmax(0, 1.5fr) minmax(240px, .82fr); }
+  .panel { padding-right: 20px; padding-left: 20px; }
+}
+@media (max-width: 860px) {
+  .sidebar { width: auto; }
+  .main-area { margin-left: 0; }
+  .topbar { height: 52px; }
+  .content-wrap { padding-top: 34px; }
+  .panel { padding: 22px; }
+}
+@media (max-width: 560px) {
+  .sidebar { height: 58px; }
+  .brand-type strong { font-size: 12px; }
+  .nav-link { min-height: 34px; font-size: 9px; }
+  .topbar { height: 44px; }
+  .content-wrap { padding: 27px 13px 38px; }
+  .intro-copy > p { font-size: 11px; }
+  .panel { padding: 18px 15px 16px; }
+  .panel h2 { font-size: 16px; }
+  .record-button, .system-button { min-height: 57px; }
+  .text-input { height: 42px; }
+  .profile-note { min-height: 46px; }
+  .secondary-column { grid-template-columns: 1fr; }
+}
