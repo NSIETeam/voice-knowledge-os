@@ -1,0 +1,353 @@
+import { useMemo, useState } from "react";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
+import { X } from "lucide-react";
+import { ipc, type ExportFormat, type Note, type VaultExportPreview } from "../lib/ipc";
+import { useT } from "../lib/locale";
+import { useRecordingStore } from "../lib/store";
+import { useCloudStore } from "../lib/cloud";
+import { Modal } from "./settings/components/Modal";
+import { Segmented } from "./settings/components/Segmented";
+import { Toggle } from "./settings/components/Toggle";
+import { Btn } from "./settings/components/Btn";
+
+// Export a note's summary / transcript / typed notes as ONE combined
+// Markdown or plain-text file (issue #18). The kit modal supplies only the
+// chrome; this component owns the body. Confirming opens the native save
+// panel (dialog plugin) and hands the chosen path to `export_note`.
+
+// Slugify a note title into a filename stem. Unicode-letter/number aware so
+// non-ASCII titles still produce a readable name; empty → "note".
+function slug(title: string): string {
+  const s = title
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return s || "note";
+}
+
+// Cheap "does the typed body have any text" check for the checkbox
+// enable/disable state. The authoritative HTML→text conversion happens
+// backend; this only needs to know whether the section is worth offering.
+function hasText(html: string): boolean {
+  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim() !== "";
+}
+
+function Check({
+  checked,
+  onChange,
+  disabled,
+  label,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  label: string;
+  hint?: string;
+}) {
+  return (
+    <label
+      className={
+        "flex items-center gap-2.5 py-1.5 text-sm " +
+        (disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer")
+      }
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 accent-[var(--color-accent)]"
+      />
+      <span>{label}</span>
+      {hint && <span className="text-[var(--color-text-muted)] text-xs">{hint}</span>}
+    </label>
+  );
+}
+
+// Contextual team hint. Manually exporting a note to hand it to someone is the
+// one moment where a team workspace is the literal answer to what the user is
+// already doing, which is why this is the only place the pitch appears outside
+// Settings. Shown only on Personal — someone already in a workspace does not
+// need telling — and gone for good on the first dismiss. It sits BELOW the
+// action row so it can never compete with Export, and says nothing about price:
+// the trial copy stays next to the button that starts one.
+//
+// The CTA hands straight to the create sheet rather than pointing at Settings.
+// A hint that answers "here is a thing that exists" with "now go find it
+// yourself" spends the one moment of intent it had; the sheet leads with the
+// same pitch Settings would have shown and carries on to a working workspace.
+const HINT_KEY = "humla.teamHint.exportDismissed";
+
+function TeamHint({ onLeave, onCreateTeam }: { onLeave: () => void; onCreateTeam: () => void }) {
+  const inWorkspace = useCloudStore((s) => s.status.current_workspace !== null);
+  const [dismissed, setDismissed] = useState(() => localStorage.getItem(HINT_KEY) === "1");
+
+  if (inWorkspace || dismissed) return null;
+
+  return (
+    <div className="flex items-start gap-2 pt-3 border-t border-[var(--color-line)]">
+      {/* Not `nd-meta`: that class is a nowrap meta-bar pill, and this is a
+          sentence that has to wrap once the window is narrow. */}
+      <p className="flex-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+        Exporting to share it? A team workspace syncs notes to teammates
+        automatically.{" "}
+        <button
+          onClick={() => {
+            // Closing first, and the sheet belongs to the PARENT: this modal is
+            // about to unmount, and a sheet rendered in here would go with it.
+            onLeave();
+            onCreateTeam();
+          }}
+          className="underline text-[var(--color-accent-text)] hover:no-underline"
+        >
+          Create one
+        </button>
+      </p>
+      <button
+        onClick={() => {
+          localStorage.setItem(HINT_KEY, "1");
+          setDismissed(true);
+        }}
+        title="Don't show this again"
+        aria-label="Dismiss team workspace hint"
+        className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+      >
+        <X size={13} strokeWidth={1.5} />
+      </button>
+    </div>
+  );
+}
+
+export function ExportModal({
+  note,
+  open,
+  onClose,
+  onCreateTeam,
+}: {
+  note: Note;
+  open: boolean;
+  onClose: () => void;
+  /** The team hint's CTA. Required rather than optional: the alternative is a
+   *  hint that renders a link doing nothing, which is worse than no hint. The
+   *  sheet has to live in the parent — see TeamHint. */
+  onCreateTeam: () => void;
+}) {
+  const t = useT();
+  const pushError = useRecordingStore((s) => s.pushError);
+
+  const hasSummary = note.summary.trim() !== "";
+  const hasTranscript = note.transcript.trim() !== "";
+  const hasNotes = hasText(note.body);
+
+  const [format, setFormat] = useState<ExportFormat>("markdown");
+  // Defaults: Summary + Transcript checked (when they have content); Notes off.
+  const [includeSummary, setIncludeSummary] = useState(hasSummary);
+  const [includeTranscript, setIncludeTranscript] = useState(hasTranscript);
+  const [includeNotes, setIncludeNotes] = useState(false);
+  const [includeSpeakerLabels, setIncludeSpeakerLabels] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [vaultSavedPath, setVaultSavedPath] = useState<string | null>(null);
+  const [vaultPreview, setVaultPreview] = useState<VaultExportPreview | null>(null);
+
+  const nothingSelected =
+    !(includeSummary && hasSummary) &&
+    !(includeTranscript && hasTranscript) &&
+    !(includeNotes && hasNotes);
+
+  const filters = useMemo(
+    () =>
+      format === "markdown"
+        ? [{ name: "Markdown", extensions: ["md", "markdown"] }]
+        : [{ name: "Plain text", extensions: ["txt"] }],
+    [format],
+  );
+
+  async function onExport() {
+    setBusy(true);
+    try {
+      const ext = format === "markdown" ? "md" : "txt";
+      const path = await save({
+        defaultPath: `${slug(note.title)}.${ext}`,
+        filters,
+      });
+      if (!path) return; // user cancelled the panel
+      await ipc.exportNote(note.id, {
+        path,
+        format,
+        includeSummary: includeSummary && hasSummary,
+        includeTranscript: includeTranscript && hasTranscript,
+        includeNotes: includeNotes && hasNotes,
+        includeSpeakerLabels,
+      });
+      onClose();
+    } catch (e) {
+      pushError({ noteId: note.id, message: `Export failed: ${String(e)}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onExportToObsidian() {
+    setBusy(true);
+    setVaultSavedPath(null);
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: t("Choose an Obsidian Vault"),
+      });
+      const vaultPath = Array.isArray(selected) ? selected[0] : selected;
+      if (!vaultPath) return;
+      const preview = await ipc.exportNoteToVault(note.id, {
+        vaultPath,
+        includeSummary: includeSummary && hasSummary,
+        includeTranscript: includeTranscript && hasTranscript,
+        includeNotes: includeNotes && hasNotes,
+        includeSpeakerLabels,
+      });
+      setVaultPreview(preview);
+    } catch (e) {
+      pushError({ noteId: note.id, message: `Obsidian export failed: ${String(e)}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelVaultPreview() {
+    if (vaultPreview) await ipc.cancelExportNoteToVault(vaultPreview.previewId);
+    setVaultPreview(null);
+  }
+
+  async function confirmVaultPreview() {
+    if (!vaultPreview) return;
+    setBusy(true);
+    try {
+      const savedPath = await ipc.commitExportNoteToVault(vaultPreview.previewId);
+      setVaultSavedPath(savedPath);
+      setVaultPreview(null);
+    } catch (e) {
+      pushError({ noteId: note.id, message: `Obsidian export failed: ${String(e)}` });
+      setVaultPreview(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeModal() {
+    if (vaultPreview) await cancelVaultPreview();
+    onClose();
+  }
+
+  return (
+    <Modal open={open} onClose={closeModal} title="Export note">
+      <div className="flex flex-col gap-5">
+        {vaultPreview ? (
+          <div className="flex flex-col gap-4">
+            <div>
+              <div className="nd-label">{t("Preview Obsidian changes")}</div>
+              <p className="mt-1 break-all text-xs text-[var(--color-text-muted)]">{vaultPreview.path}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+              <div className="min-w-0">
+                <div className="nd-label mb-1">{t("Current file")}</div>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-xs leading-relaxed">
+                  {vaultPreview.before ?? t("This file will be created.")}
+                </pre>
+              </div>
+              <div className="min-w-0">
+                <div className="nd-label mb-1">{t("Proposed file")}</div>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-xs leading-relaxed">
+                  {vaultPreview.after}
+                </pre>
+              </div>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {t("Nothing is written until you confirm. If the Vault file changes while this preview is open, HoneyVoice will stop rather than overwrite it.")}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Btn onClick={() => void cancelVaultPreview()} disabled={busy}>{t("Back without writing")}</Btn>
+              <Btn onClick={() => void confirmVaultPreview()} disabled={busy}>
+                {busy ? t("Saving…") : t(vaultPreview.isNewFile ? "Create Obsidian note" : "Apply Obsidian update")}
+              </Btn>
+            </div>
+          </div>
+        ) : <>
+        <div className="flex flex-col gap-1">
+          <div className="nd-label">Include</div>
+          <Check
+            checked={includeSummary && hasSummary}
+            disabled={!hasSummary}
+            onChange={setIncludeSummary}
+            label="Summary"
+            hint={hasSummary ? undefined : "empty"}
+          />
+          <Check
+            checked={includeTranscript && hasTranscript}
+            disabled={!hasTranscript}
+            onChange={setIncludeTranscript}
+            label="Transcript"
+            hint={hasTranscript ? undefined : "empty"}
+          />
+          <Check
+            checked={includeNotes && hasNotes}
+            disabled={!hasNotes}
+            onChange={setIncludeNotes}
+            label="Notes"
+            hint={hasNotes ? undefined : "empty"}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-sm">Speaker labels in transcript</span>
+          <Toggle
+            checked={includeSpeakerLabels}
+            onChange={setIncludeSpeakerLabels}
+            disabled={!(includeTranscript && hasTranscript)}
+            label="Include speaker labels in transcript"
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-sm">Format</span>
+          <Segmented<ExportFormat>
+            label="Export format"
+            value={format}
+            onChange={setFormat}
+            options={[
+              { value: "markdown", label: "Markdown" },
+              { value: "txt", label: "Plain text" },
+            ]}
+          />
+        </div>
+
+        <p className="-mt-3 text-xs text-[var(--color-text-muted)]">
+          {t("Obsidian exports are always Markdown.")}
+        </p>
+        <p className="-mt-4 text-xs text-[var(--color-text-muted)]">
+          {t("Obsidian exports preserve recording timestamps and stable transcript anchors when available. Audio stays in HoneyVoice.")}
+        </p>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Btn onClick={onExportToObsidian} disabled={nothingSelected || busy}>
+            {t("Export to Obsidian…")}
+          </Btn>
+          <Btn onClick={closeModal}>Cancel</Btn>
+          <Btn onClick={onExport} disabled={nothingSelected || busy}>
+            {busy ? "Exporting…" : "Export…"}
+          </Btn>
+        </div>
+
+        {vaultSavedPath && (
+          <p role="status" className="break-all text-xs text-[var(--color-success)]">
+            {t("Saved to Obsidian Vault:")} {vaultSavedPath}
+          </p>
+        )}
+
+        {!vaultSavedPath && <TeamHint onLeave={closeModal} onCreateTeam={onCreateTeam} />}
+        </>}
+      </div>
+    </Modal>
+  );
+}

@@ -1,0 +1,49 @@
+# Frontend
+node_modules/
+dist/
+.vite/
+*.log
+*.tsbuildinfo
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+
+# Built sidecar binaries (machine-specific, regenerable via build-sidecar.sh)
+src-tauri/binaries/
+
+# Metallib build cache marker (the .metallib itself stays tracked so
+# fresh clones don't need the Metal Toolchain ~700MB; rebuild via
+# scripts/build-metallib.sh — already chained from build-dmg.sh).
+src-tauri/resources/.metallib.stamp
+
+# Swift sidecar build artifacts
+audio-capture/.build/
+audio-capture/Package.resolved
+speaker-diarize/.build/
+# speaker-diarize/Package.resolved must ship with source: diarization behavior
+# and model APIs are accepted against its exact FluidAudio revision.
+
+# Icon pipeline staging
+src-tauri/icons/.app-icon-staged.png
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+.env.notarise
+
+# Marketing drafts and routines (kept local; not under MIT license)
+marketing/
+
+# Claude Code per-project skills/settings
+.claude/

@@ -1,0 +1,45 @@
+# Humla
+
+Personal macOS meeting-notes app: freeform user notes plus recorded audio, transcribed and AI-summarized. This file is a glossary of project-specific domain vocabulary — not architecture, not implementation.
+
+## Language
+
+**Note**:
+A single meeting record: the user's typed notes, the audio transcript, and an AI-generated summary, together as one unit.
+_Avoid_: Meeting, recording, entry
+
+**Title**:
+A Note's name, as it shows in the notes list and above the body. Either **user-owned** — typed by the user, or carried in from an imported file's own name — or **generated**, written by Humla for a Note that had no name of its own: the `Recording 19 Aug 14:32` a menu-bar capture starts with, the `Imported audio` an import falls back to when the file had no usable name of its own, and the short phrase derived from the Note's first paragraphs once it has content. Only a generated Title is ever overwritten automatically; a user-owned one changes only when the user edits it or explicitly asks for a new one. The distinction is read off the Title's *shape* at the moment it matters — Humla stores no flag recording who wrote it, so a generated Title that happens to look human-written is treated as human-written.
+_Avoid_: Name, heading, subject, label
+
+**Folder**:
+A general-purpose, user-defined bucket a Note can optionally belong to (zero-or-one). Used purely for browsing/organizing however the user likes — by project, by time period, by meeting type — with no fixed meaning beyond "the user filed it here."
+_Avoid_: Category, tag, group
+
+**Client**:
+The real-world business relationship (a company, or a person where the person *is* the relationship — a sole trader, an independent consultant) a Note is optionally about — zero-or-one per Note, always manually tagged by the user, never inferred or fuzzy-matched. Distinct from Folder: a Folder is about how the user organizes their own Notes for browsing; a Client is about who the other side of the meeting actually is, independent of how it's filed. The two are orthogonal and independently filterable — a search or chat query can scope by Folder, by Client, or both together. **Never a per-attendee record**: because a Note has zero-or-one Client, a Client per human you met would make "which meetings were with K2" unanswerable. Who spoke is a Speaker; who the meeting was with is the Client.
+_Avoid_: Account, contact, customer
+
+**Session**:
+The persisted, synced entity for one recording taken into a Note: its manifest row, its Timeline, and its audio where retention is on. A Note can hold several — stopping and recording again adds a Session rather than replacing what came before. Session times are local to the recording they came from; they are never rebased onto a Note-wide clock.
+_Avoid_: Run, pass, segment
+
+**Take**:
+One recording instance within a Note — the thing the user made by pressing Record and then Stop. The user-facing word for what a Session stores: "a Note recorded in three takes", "the take is still waiting to be transcribed". The two are one-to-one and not synonyms — Session names the record, Take names the recording it is a record of, so it is Sessions that sync and Takes that a user counts.
+_Avoid_: Run, pass, segment, clip
+
+**Timeline**:
+A Session's turns in order, each carrying its text, its Speaker label, its bounds and (where available) per-word times. **Canonical for a Note's content**: the Transcript is derived from the merged Timelines of every Session, so words enter a Note by being written to a Timeline, never by being written to the Transcript directly. Also what playback highlights against — but that is a use, not its definition. See `docs/adr/0004-the-timeline-is-canonical-for-a-notes-content.md`.
+_Avoid_: Track, index, word map
+
+**Transcript**:
+The Note's spoken words as one readable string, Speaker labels included — the surface the summary, chat retrieval, embeddings, search and export all read. A **projection of the Timelines**, not an independent copy: everything in it is reachable from a Timeline entry, and anything that isn't is a defect (#169). Distinct from the Note's body, which is what the user typed.
+_Avoid_: Text, transcription, log
+
+**Speaker**:
+The label naming who is talking in a transcript turn — the `Hege Tronshaugen:` in `Hege Tronshaugen: …`. A string the user asserted (by renaming the diarizer's `Speaker N:`), not a record of a person: Humla has no Person entity, and a Speaker's identity lives in the transcript text and nowhere else. The set of Speakers in one Note is derived from that text, never stored independently of it. Only ever someone who *spoke* — a silent attendee produces no label, so "participant" and "attendee" claim attendance Humla never observed. See `docs/adr/0002-no-person-entity-speakers-are-derived.md`.
+_Avoid_: Contact, person, attendee, participant
+
+**Rollup**:
+A precomputed, standing summary of everything known about one Client — risk signals, sentiment trend, open items — built from every Note tagged to that Client, refreshed as new Notes arrive rather than recomputed from scratch each time it's read.
+_Avoid_: Digest, report, brief

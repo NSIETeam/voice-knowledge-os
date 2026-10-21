@@ -1,0 +1,113 @@
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { Folder as FolderIcon } from "lucide-react";
+import { useNotesStore } from "../lib/store";
+import { indexById, matchesFilter, NO_FILTER, type NoteFilter } from "../lib/noteList";
+import { NoteCard } from "../components/NoteCard";
+import { NoteFilters } from "../components/NoteFilters";
+import { useCloudStore } from "../lib/cloud";
+
+export function Folder() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const folders = useNotesStore((s) => s.folders);
+  const notes = useNotesStore((s) => s.notes);
+  const clients = useNotesStore((s) => s.clients);
+  const recorded = useNotesStore((s) => s.recordedNoteIds);
+  const myId = useCloudStore((s) => s.status.user?.id ?? null);
+  const [filter, setFilter] = useState<NoteFilter>(NO_FILTER);
+
+  // A filter narrowing one folder says nothing about the next one, and carried
+  // across it reads as an empty folder rather than as a filter.
+  useEffect(() => setFilter(NO_FILTER), [id]);
+
+  const folder = useMemo(() => folders.find((f) => f.id === id), [folders, id]);
+  const folderNotes = useMemo(
+    () =>
+      notes
+        .filter((n) => n.folder_id === id)
+        .sort((a, b) => b.created_at - a.created_at),
+    [notes, id],
+  );
+  const clientById = useMemo(() => indexById(clients), [clients]);
+  const filtered = useMemo(
+    () =>
+      folderNotes.filter((n) =>
+        matchesFilter(n, filter, { recorded: recorded.has(n.id), myId }),
+      ),
+    [folderNotes, filter, recorded, myId],
+  );
+
+  if (!folder) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3">
+        <div className="text-[var(--color-text-muted)]">Folder not found</div>
+        <button onClick={() => navigate("/")} className="nd-btn no-drag">
+          Go home
+        </button>
+      </div>
+    );
+  }
+
+  const count = folderNotes.length;
+  const shown = filtered.length;
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* One scrolling well, matching All notes: the grid runs under a
+          translucent title bar. New note + theme toggle live in the TopBar. */}
+      <div className="flex-1 overflow-y-auto nd-well">
+        <div className="nd-well-bar">
+          <div className="max-w-[1180px] mx-auto w-full px-8 pt-14 pb-3">
+            <div className="flex items-center gap-3 px-1">
+              <span className="shrink-0 grid place-items-center w-8 h-8 rounded-[9px] bg-[var(--color-surface-raised)] border border-[var(--color-line-visible)] text-[var(--color-text-muted)]">
+                <FolderIcon size={16} strokeWidth={1.7} />
+              </span>
+              <h1 className="nd-heading truncate">{folder.name}</h1>
+              <span className="text-[14px] text-[var(--color-text-disabled)] tabular-nums shrink-0">
+                {shown === count ? count : `${shown} of ${count}`}
+              </span>
+            </div>
+            {count > 0 && (
+              <div className="px-1 pt-2">
+                {/* No unfiled toggle: every note here is filed, in this folder. */}
+                <NoteFilters
+                  value={filter}
+                  onChange={setFilter}
+                  clients={clients}
+                  showUnfiled={false}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {count === 0 ? (
+          <div className="max-w-[1180px] mx-auto w-full px-8 pt-16 text-center text-sm text-[var(--color-text-muted)]">
+            No notes in this folder yet.
+          </div>
+        ) : shown === 0 ? (
+          <div className="max-w-[1180px] mx-auto w-full px-8 pt-16 text-center text-sm text-[var(--color-text-muted)]">
+            No notes match these filters.
+          </div>
+        ) : (
+          <div className="max-w-[1180px] mx-auto w-full px-8 pt-6 pb-24">
+            <ul className="nd-notegrid">
+              {filtered.map((n) => (
+                // The folder is the view, so a folder chip on every card would
+                // say the same thing as the heading.
+                <NoteCard
+                  key={n.id}
+                  note={n}
+                  client={n.client_id ? clientById.get(n.client_id) : undefined}
+                  recorded={recorded.has(n.id)}
+                  showFolder={false}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

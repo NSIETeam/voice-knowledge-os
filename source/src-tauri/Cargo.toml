@@ -1,0 +1,97 @@
+[package]
+name = "humla"
+version = "0.1.3"
+description = "HoneyVoice — local-first voice knowledge"
+authors = ["Michael Wilhelmsen"]
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+# The app is THE binary. Required since `humla-mcp` (#172) became a second
+# `[[bin]]`: `tauri dev` shells out to a bare `cargo run`, which refuses to pick
+# between two binaries and fails the whole dev command with "could not determine
+# which binary to run".
+default-run = "humla"
+
+[lib]
+name = "humla_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# cloud-sync joins this package's workspace as a sibling member so the live sync
+# engine builds from source in-tree (it was extracted from the private
+# humla-cloud repo when the client was consolidated into the public app). Its
+# rusqlite is pinned to 0.32 to match the core — the Arc<Mutex<Connection>>
+# handed across the sync seam must unify to the same concrete type.
+#
+# echo-probe provides measured delay tracking and reference-based AEC for the
+# hybrid-call diarization input. Its CLI remains available for diagnostics.
+[workspace]
+members = ["crates/cloud-sync", "crates/echo-probe"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+serde_json = "1"
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset", "macos-private-api", "tray-icon"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls", "stream"], default-features = false }
+futures-util = "0.3"
+sha2 = "0.10"
+whisper-rs = { version = "0.16", features = ["metal", "raw-api"] }
+# Local LLM inference is delegated to whichever OpenAI-compatible HTTP server
+# the user runs (Ollama, LM Studio, llama-server, vLLM, …). We reuse the
+# existing reqwest client; no in-process GGML runtime to avoid the static
+# duplicate-GGML conflict with whisper-rs.
+uuid = { version = "1", features = ["v4", "v5"] }
+anyhow = "1"
+thiserror = "2"
+semver = "1"
+async-trait = "0.1"
+chrono = "0.4"
+parking_lot = "0.12"
+dirs = "5"
+libc = "0.2"
+tauri-plugin-process = "2"
+# Native save panel for the note-export flow (issue #18). Frontend picks the
+# target path via the JS `save()` dialog; `export_note` writes to it.
+tauri-plugin-dialog = "2"
+# Menu-bar mode (#21). The global record hotkey registers through Carbon's
+# RegisterEventHotKey, which needs no Accessibility permission — that is the
+# whole reason this is a plugin call and not our own CGEventTap.
+tauri-plugin-global-shortcut = "2"
+# Headless recordings (tray / hotkey with the window closed) have no in-app
+# toast to land in, so their start failures and their "saved to <note>"
+# confirmation go to Notification Center instead.
+tauri-plugin-notification = "2"
+# OpenAI API key lives in macOS Keychain (apple-native backend, no D-Bus
+# / linux-keyutils transitive deps). Migration from the legacy SQLite
+# row is one-shot inside read_openai_api_key.
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+# Live cloud-sync engine (PocketBase-backed, framework-agnostic). In-tree at
+# crates/cloud-sync. Optional + behind the `cloud` feature so a pure local-only
+# build can drop it (and all sync networking) entirely. Its deps are a strict
+# subset of the core's, so enabling it adds no new transitive crates.
+cloud-sync = { path = "crates/cloud-sync", optional = true }
+echo-probe = { path = "crates/echo-probe" }
+rmcp = { version = "3", default-features = false, features = ["server", "transport-io", "macros"] }
+tempfile = "3"
+tauri-plugin-deep-link = "2"
+
+[features]
+default = ["cloud"]
+# Live cloud sync. Pulls in the `cloud-sync` engine and activates the worker
+# glue in `commands::cloud_worker` (started/restarted on login + workspace
+# select). Disable with `--no-default-features` for a local-only build: the
+# teams UI stays present but inert — no sync worker, no sync networking.
+cloud = ["dep:cloud-sync"]
+custom-protocol = ["tauri/custom-protocol"]
+
+# echo-probe's tests push minutes of synthetic audio through FFTs, which takes
+# minutes unoptimised. Scoped to that one package: the app's own dev build is
+# unaffected.
+[profile.dev.package.echo-probe]
+opt-level = 3

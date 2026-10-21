@@ -1,0 +1,22 @@
+{
+  "dataset": "AISHELL/AISHELL-3",
+  "revision": "f20d5db4a31fe779ef07bb1af4ea92da5c786622",
+  "source": "https://www.openslr.org/93/",
+  "repository": "https://huggingface.co/datasets/AISHELL/AISHELL-3",
+  "license": "Apache-2.0",
+  "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0",
+  "attribution": "AISHELL-3, Beijing Shell Shell Technology Co., Ltd.; Yao Shi, Hui Bu, Xin Xu, Shaoji Zhang, Ming Li, 2020, https://arxiv.org/abs/2010.11567",
+  "selection": "First two lexicographically ordered train utterances between 441000 and 990000 bytes from each of SSB0009 and SSB0011; selected by duration proxy before inference, not model results. This longer-turn control does not replace the short-utterance test.",
+  "modifications": "Resample to mono 16 kHz PCM16; alternate four distinct utterances A/B/A/B with 600 ms gaps. No voice conversion or repeated audio. Temporary audio is not redistributed.",
+  "split": "train",
+  "speakers": [
+    {"id": "SSB0009", "files": [
+      {"name": "SSB00090015.wav", "bytes": 447418, "sha256": "13a8424d4b076213503b434f8ba501b760bd10a92e8718fe10b16cabd127cd04"},
+      {"name": "SSB00090025.wav", "bytes": 469936, "sha256": "cb630a6268a5c6399060451bc1bfe15c82e7239cab5bfcff13d9c9c4f1d479b4"}
+    ]},
+    {"id": "SSB0011", "files": [
+      {"name": "SSB00110004.wav", "bytes": 483206, "sha256": "7db08981d22b0fdee900298f613bb159989d01596bbfddab7bff90ab19054095"},
+      {"name": "SSB00110008.wav", "bytes": 468112, "sha256": "cd8cec671acc4c1d37fc4d8315b4ec10dfbab8d876c66c722a24a501dd20b497"}
+    ]}
+  ]
+}

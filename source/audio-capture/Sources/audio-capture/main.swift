@@ -1,0 +1,1348 @@
+import Foundation
+import AppKit
+import AVFoundation
+import CoreAudio
+import ScreenCaptureKit
+import CoreMedia
+import CoreGraphics
+import IOKit.pwr_mgt
+
+// Hide the sidecar from the Dock and menu bar. ScreenCaptureKit and
+// AVAudioEngine pull in AppKit transitively, which by default registers the
+// process as a regular foreground app (Dock icon, menu bar). `.prohibited`
+// makes it a true background helper. Must run before any AppKit API touches
+// process activation state, so it goes at the top of main.
+NSApplication.shared.setActivationPolicy(.prohibited)
+
+// MARK: - Mode dispatch
+
+let allArgs = CommandLine.arguments
+
+func micStatusString() -> String {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized: return "granted"
+    case .denied: return "denied"
+    case .restricted: return "restricted"
+    case .notDetermined: return "not_determined"
+    @unknown default: return "unknown"
+    }
+}
+
+func screenStatusString() -> String {
+    // Some unsigned/dev binaries can have CGPreflightScreenCaptureAccess block
+    // indefinitely on TCC lookup. Race it against a short watchdog so `status`
+    // never hangs and the permissions UI stays responsive.
+    let sema = DispatchSemaphore(value: 0)
+    var result = "unknown"
+    DispatchQueue.global(qos: .userInitiated).async {
+        let granted = CGPreflightScreenCaptureAccess()
+        result = granted ? "granted" : "denied"
+        sema.signal()
+    }
+    if sema.wait(timeout: .now() + .milliseconds(800)) == .timedOut {
+        return "unknown"
+    }
+    return result
+}
+
+func printJSON(_ obj: [String: Any]) {
+    if let data = try? JSONSerialization.data(withJSONObject: obj),
+       let s = String(data: data, encoding: .utf8) {
+        print(s)
+        fflush(stdout)
+    }
+}
+
+if allArgs.count >= 2 {
+    switch allArgs[1] {
+    case "status":
+        printJSON([
+            "microphone": micStatusString(),
+            "screen": screenStatusString(),
+        ])
+        exit(0)
+    case "request-microphone":
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            printJSON(["microphone": granted ? "granted" : "denied"])
+            exit(granted ? 0 : 1)
+        }
+        RunLoop.main.run()
+        exit(1) // unreachable
+    case "request-screen":
+        // CGRequestScreenCaptureAccess returns true if already granted; otherwise it adds
+        // the app to the privacy pane and returns false. The user must enable it manually
+        // and the app must be relaunched for the new permission to take effect.
+        let ok = CGRequestScreenCaptureAccess()
+        printJSON(["screen": ok ? "granted" : "denied"])
+        exit(ok ? 0 : 1)
+    default:
+        break
+    }
+}
+
+// MARK: - Args (recording mode)
+
+var outDir = FileManager.default.temporaryDirectory
+let args = CommandLine.arguments
+if let i = args.firstIndex(of: "--out"), i + 1 < args.count {
+    outDir = URL(fileURLWithPath: args[i + 1])
+}
+try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true, attributes: nil)
+
+// Import mode: `--import <file>`. Instead of live-capturing mic + system audio,
+// decode an existing file, resample it to the target format, and replay it
+// through the SAME VAD ChunkWriter + FullRecordingWriter used for the mic
+// stream — emitting the identical `chunk` / `full_recording` / `stopped`
+// events. The Rust side then reuses its whole recording pipeline unchanged
+// (transcribe fan-out → mic-only diarize). A one-shot replay: no AVAudioEngine,
+// no ScreenCaptureKit, no heartbeat / pause / watchdog / signal handlers.
+let importPath: String? = {
+    guard let i = args.firstIndex(of: "--import"), i + 1 < args.count else { return nil }
+    return args[i + 1]
+}()
+let isImport = importPath != nil
+
+// MARK: - Power assertion (#180)
+//
+// Idle system sleep only, never display sleep. Held by this process so the OS
+// releases it on any exit path, SIGKILL included. Taken once a stream actually
+// captures, so a denied mic doesn't hold the machine awake for nothing.
+let keepAwake = !isImport && args.contains("--keep-awake")
+let sleepAssertionLock = NSLock()
+var sleepAssertion: IOPMAssertionID = 0
+
+func holdSystemAwake() {
+    guard keepAwake else { return }
+    sleepAssertionLock.lock()
+    defer { sleepAssertionLock.unlock() }
+    if sleepAssertion != 0 { return }
+    var id: IOPMAssertionID = 0
+    let rc = IOPMAssertionCreateWithName(
+        kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+        IOPMAssertionLevel(kIOPMAssertionLevelOn),
+        "Humla is recording a meeting" as CFString,
+        &id
+    )
+    if rc == kIOReturnSuccess {
+        sleepAssertion = id
+    } else {
+        FileHandle.standardError.write(Data("power: assertion failed (\(rc))\n".utf8))
+    }
+}
+
+func releaseSystemAwake() {
+    sleepAssertionLock.lock()
+    defer { sleepAssertionLock.unlock() }
+    if sleepAssertion != 0 {
+        IOPMAssertionRelease(sleepAssertion)
+        sleepAssertion = 0
+    }
+}
+
+// MARK: - JSON event emitter (stdout)
+
+let stdoutLock = NSLock()
+func emit(_ obj: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: obj),
+          let line = String(data: data, encoding: .utf8) else { return }
+    stdoutLock.lock()
+    print(line)
+    fflush(stdout)
+    stdoutLock.unlock()
+}
+
+func emitError(_ msg: String) { emit(["event": "error", "message": msg]) }
+
+// MARK: - Target format: 16 kHz mono Float32 (in memory) → Int16 WAV on disk
+
+let targetSampleRate: Double = 16_000
+let targetFormat = AVAudioFormat(
+    commonFormat: .pcmFormatFloat32,
+    sampleRate: targetSampleRate,
+    channels: 1,
+    interleaved: false
+)!
+let writeSettings: [String: Any] = [
+    AVFormatIDKey: kAudioFormatLinearPCM,
+    AVSampleRateKey: targetSampleRate,
+    AVNumberOfChannelsKey: 1,
+    AVLinearPCMBitDepthKey: 16,
+    AVLinearPCMIsFloatKey: false,
+    AVLinearPCMIsBigEndianKey: false,
+]
+
+// MARK: - Chunk writer (per source)
+
+// One ChunkWriter per source (mic / sys). Each writes its own VAD-bounded
+// chunk WAVs and tags every emitted event with the `source` so the Rust side
+// can route transcribes and label the final transcript ("You" for mic, the
+// diarized speaker IDs for system). Filenames are prefixed by source so the
+// two writers can share the same temp dir without colliding.
+final class ChunkWriter {
+    private let source: String
+    private let dir: URL
+    private let minFrames: AVAudioFrameCount
+    private let maxFrames: AVAudioFrameCount
+    private let vadSilenceFrames: AVAudioFrameCount
+    private let silenceThreshold: Float = 0.005   // chunk-level: below this we drop the chunk
+    private let vadFrameThreshold: Float = 0.008  // per-buffer peak: above this counts as voice
+    private var index: Int = 0
+    private var file: AVAudioFile?
+    private var url: URL?
+    private var written: AVAudioFrameCount = 0
+    private var chunkPeak: Float = 0
+    private var silentRun: AVAudioFrameCount = 0
+    // Total frames written across ALL chunks since the writer opened. Used
+    // to compute each chunk's start_ms relative to this stream's t=0 (the
+    // first frame this writer ever received). Each stream has its own
+    // timeline; the offline diarize pass aligns chunks within their own
+    // full.wav, so per-stream-relative is the right anchor.
+    private var totalFramesWritten: AVAudioFrameCount = 0
+    private var chunkStartFrames: AVAudioFrameCount = 0
+    private let queue: DispatchQueue
+    // Set by `close()`. A later buffer would start a chunk after `stopped`,
+    // which the parent never reads. See `FullRecordingWriter.closed`.
+    private var closed = false
+
+    init(source: String, dir: URL, minSeconds: Double, maxSeconds: Double, vadSilenceMs: Double) {
+        self.source = source
+        self.dir = dir
+        self.minFrames = AVAudioFrameCount(minSeconds * targetSampleRate)
+        self.maxFrames = AVAudioFrameCount(maxSeconds * targetSampleRate)
+        self.vadSilenceFrames = AVAudioFrameCount((vadSilenceMs / 1000.0) * targetSampleRate)
+        self.queue = DispatchQueue(label: "chunk.writer.\(source)")
+    }
+
+    func write(_ buffer: AVAudioPCMBuffer) {
+        queue.sync {
+            if closed { return }
+            do {
+                if file == nil { try openNext() }
+                try file!.write(from: buffer)
+                written += buffer.frameLength
+                totalFramesWritten += buffer.frameLength
+
+                // Per-buffer peak feeds both the chunk-level peak (used for the
+                // silence-drop on close) and the silent-run counter (used by
+                // the VAD rotation trigger).
+                var bufPeak: Float = 0
+                if let chans = buffer.floatChannelData {
+                    let n = Int(buffer.frameLength)
+                    for i in 0..<n {
+                        let v = abs(chans[0][i])
+                        if v > bufPeak { bufPeak = v }
+                    }
+                }
+                if bufPeak > chunkPeak { chunkPeak = bufPeak }
+                if bufPeak < vadFrameThreshold {
+                    silentRun += buffer.frameLength
+                } else {
+                    silentRun = 0
+                }
+
+                // Rotate on whichever fires first:
+                //  - hard cap (maxFrames) so a continuous monologue still gets
+                //    transcribed periodically and the trailing-context prompt
+                //    stays fresh on the consuming side.
+                //  - VAD pause detected, but only after the chunk reached
+                //    minFrames so we don't emit micro-chunks that lose context.
+                let vadRotate = written >= minFrames && silentRun >= vadSilenceFrames
+                if written >= maxFrames || vadRotate {
+                    try rotate()
+                }
+            } catch {
+                emitError("\(source) write: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func close() {
+        queue.sync {
+            closed = true
+            if let u = url, written > 0 {
+                file = nil
+                if chunkPeak >= silenceThreshold {
+                    let startMs = Int(Double(chunkStartFrames) / targetSampleRate * 1000.0)
+                    emit([
+                        "event": "chunk",
+                        "source": source,
+                        "path": u.path,
+                        "start_ms": startMs,
+                    ])
+                    stats.lock.lock(); stats.chunks += 1; stats.lock.unlock()
+                } else {
+                    try? FileManager.default.removeItem(at: u)
+                }
+            }
+            file = nil
+            url = nil
+            written = 0
+            chunkPeak = 0
+            silentRun = 0
+        }
+    }
+
+    private func openNext() throws {
+        index += 1
+        let u = dir.appendingPathComponent(String(format: "%@-chunk-%04d.wav", source, index))
+        url = u
+        file = try AVAudioFile(forWriting: u, settings: writeSettings)
+        written = 0
+        chunkStartFrames = totalFramesWritten
+    }
+
+    private func rotate() throws {
+        guard let u = url else { return }
+        file = nil
+        if chunkPeak >= silenceThreshold {
+            let startMs = Int(Double(chunkStartFrames) / targetSampleRate * 1000.0)
+            emit([
+                "event": "chunk",
+                "source": source,
+                "path": u.path,
+                "start_ms": startMs,
+            ])
+            stats.lock.lock(); stats.chunks += 1; stats.lock.unlock()
+        } else {
+            try? FileManager.default.removeItem(at: u)
+        }
+        chunkPeak = 0
+        silentRun = 0
+        try openNext()
+    }
+}
+
+// Tuned to keep VAD as the primary boundary picker, with the max only as
+// a safety net:
+//   - minSeconds 1.0 lets short utterances flush quickly.
+//   - maxSeconds 15.0 — high enough that an 8 s monologue doesn't cap
+//     mid-word ("mistenkte" → "mistred"). Whisper actually transcribes
+//     longer chunks more accurately because it sees more context, so we
+//     prefer letting VAD pick the boundary even if that's a bit slower.
+//   - vadSilenceMs 500 catches sentence-end pauses without triggering on
+//     normal between-word stops (which are typically 100–300 ms).
+let micWriter = ChunkWriter(source: "mic", dir: outDir, minSeconds: 1.0, maxSeconds: 15.0, vadSilenceMs: 500.0)
+let sysWriter = ChunkWriter(source: "sys", dir: outDir, minSeconds: 1.0, maxSeconds: 15.0, vadSilenceMs: 500.0)
+
+// MARK: - Full-recording writer (per source)
+
+// Parallel writer that captures every received frame into a single WAV for
+// the duration of the recording. Each source gets its own full.wav (so the
+// post-stop diarizer can treat them as independent streams: in-person calls
+// produce only mic_full.wav and run multi-speaker diarize there; remote
+// calls produce both files and run "mic = You, sys = diarize speakers").
+// ~58 MB per 30-min meeting at 16 kHz mono 16-bit per source.
+final class FullRecordingWriter {
+    private let source: String
+    private let dir: URL
+    private var file: AVAudioFile?
+    private var url: URL?
+    private var written: AVAudioFrameCount = 0
+    private let queue: DispatchQueue
+    // Buffers still arrive after `close()`: shutdown closes the writers before
+    // it awaits `stopCapture()`, and ScreenCaptureKit delivers until that
+    // returns. Opening the file again would replace the recording
+    // `full_recording` just reported, so they are dropped, and counted.
+    private var closed = false
+    private var writesAfterClose = 0
+
+    init(source: String, dir: URL) {
+        self.source = source
+        self.dir = dir
+        self.queue = DispatchQueue(label: "full.writer.\(source)")
+    }
+
+    /// Whether `buffer` reached the file: false once closed, or if the write failed.
+    @discardableResult
+    func write(_ buffer: AVAudioPCMBuffer) -> Bool {
+        queue.sync {
+            if closed {
+                writesAfterClose += 1
+                // Said here as well as in `shutdown`, whose tally is lost if the
+                // process dies first: once the parent stops reading stdout at
+                // `stopped`, the next heartbeat raises SIGPIPE.
+                if writesAfterClose == 1 {
+                    FileHandle.standardError.write(Data(
+                        "capture timing: a \(source) buffer reached the full-recording writer after it closed; dropped, with any after it\n".utf8
+                    ))
+                }
+                return false
+            }
+            do {
+                if file == nil {
+                    let u = dir.appendingPathComponent("\(source)-full.wav")
+                    url = u
+                    file = try AVAudioFile(forWriting: u, settings: writeSettings)
+                }
+                try file!.write(from: buffer)
+                written += buffer.frameLength
+                return true
+            } catch {
+                emitError("\(source) full write: \(error.localizedDescription)")
+                return false
+            }
+        }
+    }
+
+    /// See `writesAfterClose`.
+    func lateWriteCount() -> Int {
+        queue.sync { writesAfterClose }
+    }
+
+    func close() {
+        queue.sync {
+            closed = true
+            file = nil
+            if let u = url, written > 0 {
+                let durationMs = Int(Double(written) / targetSampleRate * 1000.0)
+                emit([
+                    "event": "full_recording",
+                    "source": source,
+                    "path": u.path,
+                    "duration_ms": durationMs,
+                ])
+            }
+            url = nil
+            written = 0
+        }
+    }
+}
+
+let micFullWriter = FullRecordingWriter(source: "mic", dir: outDir)
+let sysFullWriter = FullRecordingWriter(source: "sys", dir: outDir)
+
+// MARK: - Stats (diagnostics)
+
+final class Stats {
+    let lock = NSLock()
+    var micFrames: Int = 0
+    var sysFrames: Int = 0
+    var chunks: Int = 0
+    var micPeak: Float = 0
+    var sysPeak: Float = 0
+}
+let stats = Stats()
+
+func recordMicStats(samples: [Float]) {
+    let peak = samples.reduce(0 as Float) { max($0, abs($1)) }
+    stats.lock.lock()
+    stats.micFrames += samples.count
+    if peak > stats.micPeak { stats.micPeak = peak }
+    stats.lock.unlock()
+}
+
+func recordSysStats(samples: [Float]) {
+    let peak = samples.reduce(0 as Float) { max($0, abs($1)) }
+    stats.lock.lock()
+    stats.sysFrames += samples.count
+    if peak > stats.sysPeak { stats.sysPeak = peak }
+    stats.lock.unlock()
+}
+
+// MARK: - Capture timing (diagnostics)
+//
+// Where each stream's first frame fell on the host clock, and whether the
+// frames after it kept pace — see StreamTiming.swift. Reported once, as
+// `capture_timing`, just before `stopped`.
+
+/// The host clock in seconds: `mach_absolute_time`'s timebase, which an input
+/// tap's `AVAudioTime.hostTime` and ScreenCaptureKit's presentation timestamps
+/// are both expected to be in. Each interval reports its first frame's arrival
+/// beside its stamp, which is what checks that expectation per stream.
+func hostSecondsNow() -> Double {
+    AVAudioTime.seconds(forHostTime: mach_absolute_time())
+}
+
+/// Every host time `capture_timing` reports is relative to this instant. Taken
+/// here, before either stream starts: main.swift initialises its globals in
+/// order, so this runs ahead of `engine.start()` below.
+let timingEpoch = hostSecondsNow()
+
+let micTiming = StreamTiming()
+let sysTiming = StreamTiming()
+
+// MARK: - Input device name (#174)
+//
+// The no-audio warning used to say "check your microphone", which named the one
+// thing the user can't see. The failure that motivated this was a pair of
+// headphones connected in *another room* holding the macOS default input: the
+// frame counters climbed (the tap delivers samples whether or not anyone is
+// audible), so only `chunks` staying at 0 revealed the fault, and that reads as
+// "nobody has spoken yet" rather than as a broken device.
+//
+// WHICH DEVICE WE NAME: the one the tap is actually on, falling back to the
+// system default. The two agree in the normal case and diverge exactly when
+// something has gone wrong — and in that case the engine's device is both the
+// truthful answer and the more useful one. If the engine ever fails to follow a
+// default-input change (the fault `reconfigureMicAfterDeviceChange` below
+// exists to repair), naming the system default would name a device that is
+// already correct, and the warning would read as "your working mic is broken"
+// while Humla quietly recorded a dead one.
+//
+// PRIVACY: device names are user-authored and routinely contain a real person's
+// name ("Michael's AirPods Pro"). This value rides the heartbeat to a transient
+// warning and stops there — it must never reach a diagnostics dump, a log that
+// gets shared, or anything synced.
+
+/// Human-readable name of a CoreAudio device, or nil if the HAL won't name it.
+func audioDeviceName(_ id: AudioDeviceID) -> String? {
+    guard id != AudioDeviceID(kAudioObjectUnknown) else { return nil }
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioObjectPropertyName,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var name: CFString? = nil
+    var size = UInt32(MemoryLayout<CFString?>.size)
+    let status = withUnsafeMutablePointer(to: &name) {
+        AudioObjectGetPropertyData(id, &address, 0, nil, &size, $0)
+    }
+    guard status == noErr, let resolved = name as String? else { return nil }
+    let trimmed = resolved.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}
+
+/// The device macOS currently considers the default input — what the engine
+/// follows, and what the user sees selected in System Settings.
+func defaultInputDeviceID() -> AudioDeviceID {
+    defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice)
+}
+
+/// The default output — where a call plays, and so where an echo on the mic
+/// comes from. Read for the timing report only.
+func defaultOutputDeviceID() -> AudioDeviceID {
+    defaultDeviceID(kAudioHardwarePropertyDefaultOutputDevice)
+}
+
+func defaultDeviceID(_ selector: AudioObjectPropertySelector) -> AudioDeviceID {
+    var address = AudioObjectPropertyAddress(
+        mSelector: selector,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var id = AudioDeviceID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    let status = AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id
+    )
+    return status == noErr ? id : AudioDeviceID(kAudioObjectUnknown)
+}
+
+/// Name of the device the mic tap is running against. Called on the main
+/// thread at tap-install time only — see `InputDevice` below.
+func resolveInputDeviceName() -> String? {
+    audioDeviceName(engine.inputNode.auAudioUnit.deviceID)
+        ?? audioDeviceName(defaultInputDeviceID())
+}
+
+/// Best answer available when there is *no* tap — mic permission denied, the
+/// input format came back unusable, or a device change left the engine without
+/// one. The engine has no device to report in those states, but the HAL still
+/// names what macOS would use, and that is the device the user has to go and
+/// change. Naming it is the whole point of #174, and the tap failing to install
+/// is the closest sibling of the fault that motivated it.
+///
+/// Note this reads the system default WITHOUT touching `engine.inputNode` —
+/// which is what makes it safe on the paths where the engine is broken.
+func resolveDefaultInputDeviceName() -> String? {
+    audioDeviceName(defaultInputDeviceID())
+}
+
+/// Cache for the resolved name. The heartbeat fires on its own queue, and
+/// reaching into `AVAudioEngine` from there to re-resolve every 2s would both
+/// touch the engine off the main thread and re-query the HAL for a value that
+/// only changes when the tap is reinstalled. Resolved where that happens
+/// instead (`installMicTap`, always on the main thread) and read here.
+final class InputDevice {
+    private let lock = NSLock()
+    private var name: String?
+    func set(_ value: String?) {
+        lock.lock()
+        name = value
+        lock.unlock()
+    }
+    func get() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return name
+    }
+}
+let inputDevice = InputDevice()
+
+/// The device the mic tap was last installed on, as an id — for the timing
+/// report's latency figures, never for a name. Set where the tap is installed
+/// (main thread), read at shutdown, for the same reason `InputDevice` is.
+final class TappedInputDevice {
+    private let lock = NSLock()
+    private var id = AudioDeviceID(kAudioObjectUnknown)
+    func set(_ value: AudioDeviceID) {
+        lock.lock()
+        id = value
+        lock.unlock()
+    }
+    func get() -> AudioDeviceID {
+        lock.lock()
+        defer { lock.unlock() }
+        return id
+    }
+}
+let tappedInputDevice = TappedInputDevice()
+
+func deviceUInt32(
+    _ id: AudioObjectID,
+    _ selector: AudioObjectPropertySelector,
+    _ scope: AudioObjectPropertyScope
+) -> UInt32? {
+    var address = AudioObjectPropertyAddress(
+        mSelector: selector,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var value: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value)
+    return status == noErr ? value : nil
+}
+
+func deviceFloat64(
+    _ id: AudioObjectID,
+    _ selector: AudioObjectPropertySelector,
+    _ scope: AudioObjectPropertyScope
+) -> Double? {
+    var address = AudioObjectPropertyAddress(
+        mSelector: selector,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var value: Float64 = 0
+    var size = UInt32(MemoryLayout<Float64>.size)
+    let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value)
+    return status == noErr && value.isFinite ? value : nil
+}
+
+/// Latency of a device's first stream in `scope`, which the HAL reports apart
+/// from the device's own.
+func firstStreamLatency(_ id: AudioObjectID, _ scope: AudioObjectPropertyScope) -> UInt32? {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyStreams,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size) == noErr,
+          size >= UInt32(MemoryLayout<AudioStreamID>.size) else { return nil }
+    var streams = [AudioStreamID](
+        repeating: 0,
+        count: Int(size) / MemoryLayout<AudioStreamID>.size
+    )
+    guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &streams) == noErr,
+          let first = streams.first else { return nil }
+    return deviceUInt32(first, kAudioStreamPropertyLatency, kAudioObjectPropertyScopeGlobal)
+}
+
+/// One device's latency and clocking as the HAL reports it — what splits an
+/// echo delay into the capture's start offset and the device's own path (a
+/// built-in speaker's few milliseconds against a Bluetooth output's hundreds).
+/// `clock_domain` says whether two devices share a sample clock, and so
+/// whether their streams can drift apart at all.
+///
+/// The transport is its four-char code (`bltn`, `blue`, `usb `…), never the
+/// device's name: names are display-only (#174) and this is persisted.
+func deviceTimingReport(_ id: AudioDeviceID, scope: AudioObjectPropertyScope) -> [String: Any]? {
+    guard id != AudioDeviceID(kAudioObjectUnknown) else { return nil }
+    let global = kAudioObjectPropertyScopeGlobal
+    var out: [String: Any] = [:]
+    if let v = deviceUInt32(id, kAudioDevicePropertyTransportType, global) {
+        out["transport"] = fourCCString(v)
+    }
+    if let v = deviceFloat64(id, kAudioDevicePropertyNominalSampleRate, global) {
+        out["nominal_rate"] = v
+    }
+    if let v = deviceUInt32(id, kAudioDevicePropertyLatency, scope) {
+        out["latency_frames"] = Int(v)
+    }
+    if let v = deviceUInt32(id, kAudioDevicePropertySafetyOffset, scope) {
+        out["safety_offset_frames"] = Int(v)
+    }
+    if let v = deviceUInt32(id, kAudioDevicePropertyBufferFrameSize, scope) {
+        out["buffer_frames"] = Int(v)
+    }
+    if let v = firstStreamLatency(id, scope) {
+        out["stream_latency_frames"] = Int(v)
+    }
+    if let v = deviceUInt32(id, kAudioDevicePropertyClockDomain, global) {
+        out["clock_domain"] = Int(v)
+    }
+    return out
+}
+
+/// Emit `capture_timing`. Called once, from shutdown: after the writers close,
+/// so `frames_written` is final, and before `stopped`, after which the Rust
+/// reader stops reading.
+func emitCaptureTiming() {
+    var devices: [String: Any] = [:]
+    let tapped = tappedInputDevice.get()
+    let inputID = tapped != AudioDeviceID(kAudioObjectUnknown) ? tapped : defaultInputDeviceID()
+    if let d = deviceTimingReport(inputID, scope: kAudioObjectPropertyScopeInput) {
+        devices["input"] = d
+    }
+    if let d = deviceTimingReport(defaultOutputDeviceID(), scope: kAudioObjectPropertyScopeOutput) {
+        devices["output"] = d
+    }
+    let payload: [String: Any] = [
+        "event": "capture_timing",
+        "version": 1,
+        "gap_threshold_ms": millis(deliveryGapThreshold),
+        "streams": [
+            micTiming.report(source: "mic", epoch: timingEpoch),
+            sysTiming.report(source: "sys", epoch: timingEpoch),
+        ],
+        "devices": devices,
+    ]
+    // Checked rather than trusted: JSONSerialization raises on anything it
+    // can't write, and that would take the `stopped` after this with it.
+    guard JSONSerialization.isValidJSONObject(payload) else {
+        FileHandle.standardError.write(Data("capture timing: payload not serialisable, skipped\n".utf8))
+        return
+    }
+    emit(payload)
+}
+
+// Wrap a Float32 sample array into an AVAudioPCMBuffer for the writers. The
+// writers expect mono Float32 at the target sample rate.
+func makeBuffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
+    guard !samples.isEmpty,
+          let buf = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: AVAudioFrameCount(samples.count)) else {
+        return nil
+    }
+    buf.frameLength = AVAudioFrameCount(samples.count)
+    if let chans = buf.floatChannelData {
+        samples.withUnsafeBufferPointer { src in
+            chans[0].update(from: src.baseAddress!, count: samples.count)
+        }
+    }
+    return buf
+}
+
+// MARK: - Mic via AVAudioEngine
+
+let engine = AVAudioEngine()
+var micConverter: AVAudioConverter?
+
+// Build the mic converter for `inFormat` and install the capture tap. Factored
+// out so both initial setup and post-device-change recovery install an
+// identical tap against whatever the current input format happens to be.
+func installMicTap(_ input: AVAudioInputNode, format inFormat: AVAudioFormat) {
+    micConverter = AVAudioConverter(from: inFormat, to: targetFormat)
+    // Both callers are on the main thread (startup, and device-change
+    // recovery). Cached rather than re-resolved per heartbeat — see `InputDevice`.
+    inputDevice.set(resolveInputDeviceName())
+    tappedInputDevice.set(engine.inputNode.auAudioUnit.deviceID)
+    input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { buffer, when in
+        let arrival = hostSecondsNow()
+        guard let conv = micConverter else { return }
+        let ratio = targetSampleRate / inFormat.sampleRate
+        let cap = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1024)
+        guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: cap) else { return }
+        var error: NSError?
+        var supplied = false
+        let status = conv.convert(to: out, error: &error) { _, status in
+            if supplied {
+                status.pointee = .noDataNow
+                return nil
+            }
+            supplied = true
+            status.pointee = .haveData
+            return buffer
+        }
+        var written = 0
+        if status != .error, out.frameLength > 0,
+           let chans = out.floatChannelData {
+            let n = Int(out.frameLength)
+            let arr = Array(UnsafeBufferPointer(start: chans[0], count: n))
+            recordMicStats(samples: arr)
+            if let buf = makeBuffer(arr) {
+                micWriter.write(buf)
+                guard micFullWriter.write(buf) else { return }
+                written = n
+            }
+        }
+        // Noted whenever the converter took the buffer, even when it gave
+        // nothing back yet: those frames are held, not lost. One the full
+        // writer turned away returned above, as if it had never arrived.
+        if status != .error {
+            micTiming.note(
+                stamp: when.isHostTimeValid ? AVAudioTime.seconds(forHostTime: when.hostTime) : nil,
+                arrival: arrival,
+                inFrames: Int(buffer.frameLength),
+                inRate: buffer.format.sampleRate,
+                outFrames: written
+            )
+        }
+    }
+}
+
+if !isImport {
+do {
+    let input = engine.inputNode
+    // NOTE: do NOT call `input.setVoiceProcessingEnabled(true)`. It enables
+    // hardware AEC, but the voice-processing IO unit takes over the audio
+    // device for *both* directions, which ducks the system output (you
+    // can't hear the other person on a call). Echo-cancel the mic in a
+    // post-stop dedup pass instead — see commands.rs.
+    let inFormat = input.inputFormat(forBus: 0)
+    if inFormat.sampleRate == 0 || inFormat.channelCount == 0 {
+        emitError("Microphone input format invalid (sampleRate=\(inFormat.sampleRate), channels=\(inFormat.channelCount)). Dev binaries without an Info.plist may be silently denied audio. Try running 'pnpm tauri build --debug' and launching the .app instead of 'pnpm tauri dev'.")
+        throw NSError(domain: "audio-capture", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid input format"])
+    }
+    installMicTap(input, format: inFormat)
+    engine.prepare()
+    try engine.start()
+    holdSystemAwake()
+} catch {
+    // No tap was installed, so `installMicTap` never resolved a name — and this
+    // is exactly the shape of failure #174 is about (mic permission silently
+    // denied, no usable input device). The heartbeat keeps firing and the
+    // no-audio warning latches at 10s, so it should be able to say which device
+    // it isn't hearing here too.
+    inputDevice.set(resolveDefaultInputDeviceName())
+    emitError("mic engine: \(error.localizedDescription)")
+}
+} // if !isImport
+
+// MARK: - System audio via ScreenCaptureKit
+
+final class StreamDelegate: NSObject, SCStreamDelegate {
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        emitError("screen capture stopped: \(error.localizedDescription)")
+    }
+    func outputVideoEffectDidStart(for stream: SCStream) {
+        FileHandle.standardError.write(Data("scstream: video effect started\n".utf8))
+    }
+    func outputVideoEffectDidStop(for stream: SCStream) {
+        FileHandle.standardError.write(Data("scstream: video effect stopped\n".utf8))
+    }
+}
+
+let streamDelegate = StreamDelegate()
+
+final class SystemAudioOutput: NSObject, SCStreamOutput {
+    var converter: AVAudioConverter?
+    var inFormat: AVAudioFormat?
+    var bufferCount: Int = 0
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .audio else { return }
+        let arrival = hostSecondsNow()
+        bufferCount += 1
+        if bufferCount == 1 {
+            FileHandle.standardError.write(Data("scstream: first audio buffer received\n".utf8))
+        }
+        guard CMSampleBufferIsValid(sampleBuffer),
+              let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee
+        else {
+            if bufferCount <= 3 {
+                FileHandle.standardError.write(Data("scstream: invalid audio buffer (count=\(bufferCount))\n".utf8))
+            }
+            return
+        }
+        if bufferCount == 1 {
+            FileHandle.standardError.write(Data(
+                "scstream: input format sr=\(asbd.mSampleRate)Hz channels=\(asbd.mChannelsPerFrame) bytes/frame=\(asbd.mBytesPerFrame) flags=\(asbd.mFormatFlags)\n".utf8
+            ))
+        }
+
+        // Build/refresh source format
+        if inFormat == nil || inFormat?.sampleRate != asbd.mSampleRate ||
+            inFormat?.channelCount != asbd.mChannelsPerFrame {
+            var asbdCopy = asbd
+            inFormat = AVAudioFormat(streamDescription: &asbdCopy)
+            if let inF = inFormat {
+                converter = AVAudioConverter(from: inF, to: targetFormat)
+                FileHandle.standardError.write(Data(
+                    "scstream: built converter inFormat=\(inF) → target\n".utf8
+                ))
+            } else {
+                FileHandle.standardError.write(Data(
+                    "scstream: AVAudioFormat(streamDescription:) returned nil\n".utf8
+                ))
+            }
+        }
+        guard let inFormat = inFormat, let conv = converter else {
+            if bufferCount <= 3 {
+                FileHandle.standardError.write(Data(
+                    "scstream: bail at converter check (inFormat=\(self.inFormat as Any), conv=\(self.converter as Any))\n".utf8
+                ))
+            }
+            return
+        }
+
+        // CMSampleBuffer → AVAudioPCMBuffer
+        let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frames > 0 else {
+            if bufferCount <= 3 {
+                FileHandle.standardError.write(Data("scstream: zero frames\n".utf8))
+            }
+            return
+        }
+        guard let inBuffer = AVAudioPCMBuffer(pcmFormat: inFormat, frameCapacity: frames) else {
+            FileHandle.standardError.write(Data("scstream: AVAudioPCMBuffer alloc failed\n".utf8))
+            return
+        }
+        inBuffer.frameLength = frames
+
+        // SCK delivers deinterleaved Float32 with up to N channels (2 for
+        // stereo system audio). The default `AudioBufferList()` only holds
+        // ONE AudioBuffer slot; CMSampleBufferGetAudioBufferListWith… needs
+        // a slot per channel and returns -12737
+        // (kCMSampleBufferError_ArrayTooSmall) if the list is too small.
+        // Allocate dynamically based on channel count.
+        var blockBuffer: CMBlockBuffer?
+        let numBuffers = max(1, Int(inFormat.channelCount))
+        let listSize = MemoryLayout<AudioBufferList>.size
+            + max(0, numBuffers - 1) * MemoryLayout<AudioBuffer>.size
+        let abl = AudioBufferList.allocate(maximumBuffers: numBuffers)
+        defer { free(abl.unsafeMutablePointer) }
+
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: abl.unsafeMutablePointer,
+            bufferListSize: listSize,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+            blockBufferOut: &blockBuffer
+        )
+        guard status == noErr else {
+            if bufferCount <= 3 {
+                FileHandle.standardError.write(Data("scstream: GetAudioBufferList status=\(status) (numBuffers=\(numBuffers), listSize=\(listSize))\n".utf8))
+            }
+            return
+        }
+
+        // Copy each channel from the source list into the matching slot in
+        // inBuffer's deinterleaved layout.
+        let inAbl = UnsafeMutableAudioBufferListPointer(inBuffer.mutableAudioBufferList)
+        let copyChannels = min(inAbl.count, abl.count)
+        for i in 0..<copyChannels {
+            if let dst = inAbl[i].mData, let src = abl[i].mData {
+                let n = Int(min(abl[i].mDataByteSize, inAbl[i].mDataByteSize))
+                memcpy(dst, src, n)
+            }
+        }
+
+        let ratio = targetSampleRate / inFormat.sampleRate
+        let cap = AVAudioFrameCount(Double(frames) * ratio + 1024)
+        guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: cap) else {
+            FileHandle.standardError.write(Data("scstream: out PCMBuffer alloc failed\n".utf8))
+            return
+        }
+
+        var error: NSError?
+        var supplied = false
+        let convStatus = conv.convert(to: out, error: &error) { _, status in
+            if supplied { status.pointee = .noDataNow; return nil }
+            supplied = true
+            status.pointee = .haveData
+            return inBuffer
+        }
+        if convStatus == .error {
+            if bufferCount <= 3 {
+                let msg = error?.localizedDescription ?? "unknown"
+                FileHandle.standardError.write(Data("scstream: conv.convert error: \(msg)\n".utf8))
+            }
+            return
+        }
+        guard let chans = out.floatChannelData else {
+            if bufferCount <= 3 {
+                FileHandle.standardError.write(Data("scstream: no floatChannelData on out buffer\n".utf8))
+            }
+            return
+        }
+        let n = Int(out.frameLength)
+        let arr = Array(UnsafeBufferPointer(start: chans[0], count: n))
+        recordSysStats(samples: arr)
+        var written = 0
+        if let buf = makeBuffer(arr) {
+            sysWriter.write(buf)
+            guard sysFullWriter.write(buf) else { return }
+            written = n
+            if bufferCount == 1 {
+                FileHandle.standardError.write(Data(
+                    "scstream: first buffer written to sysWriter (n=\(n) samples)\n".utf8
+                ))
+            }
+        } else {
+            if bufferCount <= 3 {
+                FileHandle.standardError.write(Data("scstream: makeBuffer returned nil (n=\(n))\n".utf8))
+            }
+        }
+        // Only a buffer that got this far is noted, so one dropped on any of
+        // the early returns above shows up as a gap in what was written —
+        // which is the timeline the WAV actually has.
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        sysTiming.note(
+            stamp: pts.isNumeric ? pts.seconds : nil,
+            arrival: arrival,
+            inFrames: Int(frames),
+            inRate: inFormat.sampleRate,
+            outFrames: written
+        )
+    }
+}
+
+let systemOutput = SystemAudioOutput()
+var scStream: SCStream?
+
+func startSystemAudio() async {
+    do {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let display = content.displays.first else {
+            emitError("no display")
+            return
+        }
+        // Filter excludes our own process so we don't capture our own output.
+        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+
+        let cfg = SCStreamConfiguration()
+        cfg.capturesAudio = true
+        cfg.excludesCurrentProcessAudio = true
+        cfg.sampleRate = 48_000
+        cfg.channelCount = 2
+        // Minimize video work; we still need a video stream for SCK to be happy.
+        cfg.width = 2
+        cfg.height = 2
+        cfg.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        cfg.queueDepth = 5
+
+        let stream = SCStream(filter: filter, configuration: cfg, delegate: streamDelegate)
+        FileHandle.standardError.write(Data("scstream: starting capture (display=\(display.displayID))\n".utf8))
+        let q = DispatchQueue(label: "sck.audio")
+        try stream.addStreamOutput(systemOutput, type: .audio, sampleHandlerQueue: q)
+        // Adding a video output is required by SCK; we just discard.
+        try stream.addStreamOutput(NoopVideoOutput(), type: .screen, sampleHandlerQueue: DispatchQueue(label: "sck.video"))
+        try await stream.startCapture()
+        scStream = stream
+        holdSystemAwake()
+        FileHandle.standardError.write(Data("scstream: capture started successfully\n".utf8))
+    } catch {
+        emitError("screen capture: \(error.localizedDescription)")
+    }
+}
+
+final class NoopVideoOutput: NSObject, SCStreamOutput {
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {}
+}
+
+if !isImport {
+    Task { await startSystemAudio() }
+}
+
+// MARK: - Heartbeat (every 2s) for live diagnostics
+
+let hbQueue = DispatchQueue(label: "heartbeat")
+let hbTimer = DispatchSource.makeTimerSource(queue: hbQueue)
+hbTimer.schedule(deadline: .now() + 2, repeating: 2)
+hbTimer.setEventHandler {
+    stats.lock.lock()
+    let mF = stats.micFrames
+    let sF = stats.sysFrames
+    let ch = stats.chunks
+    let mp = stats.micPeak
+    let sp = stats.sysPeak
+    stats.micPeak = 0
+    stats.sysPeak = 0
+    stats.lock.unlock()
+    var payload: [String: Any] = [
+        "event": "heartbeat",
+        "mic_frames": mF,
+        "sys_frames": sF,
+        "chunks": ch,
+        "mic_peak": mp,
+        "sys_peak": sp,
+    ]
+    // Omitted rather than sent as null when the HAL won't name the device; the
+    // Rust side defaults the field and the warning falls back to its
+    // device-less copy.
+    if let device = inputDevice.get() { payload["input_device"] = device }
+    emit(payload)
+}
+if !isImport {
+    hbTimer.resume()
+}
+
+// MARK: - Pause / Resume via SIGUSR1 / SIGUSR2
+
+var paused: Bool = false
+
+func pauseCapture() {
+    if paused { return }
+    paused = true
+    engine.pause()
+    if let s = scStream {
+        Task { try? await s.stopCapture() }
+        scStream = nil
+    }
+    emit(["event": "paused"])
+}
+
+func resumeCapture() {
+    if !paused { return }
+    paused = false
+    // Marked at resume rather than at pause: a ScreenCaptureKit stream stops
+    // asynchronously, and a straggler delivered after the pause still belongs
+    // to the interval before it.
+    micTiming.openInterval("resume")
+    sysTiming.openInterval("resume")
+    do {
+        try engine.start()
+    } catch {
+        emitError("resume mic: \(error.localizedDescription)")
+    }
+    Task { await startSystemAudio() }
+    emit(["event": "resumed"])
+}
+
+let pauseSrc = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+let resumeSrc = DispatchSource.makeSignalSource(signal: SIGUSR2, queue: .main)
+signal(SIGUSR1, SIG_IGN)
+signal(SIGUSR2, SIG_IGN)
+pauseSrc.setEventHandler { pauseCapture() }
+resumeSrc.setEventHandler { resumeCapture() }
+if !isImport {
+    pauseSrc.resume()
+    resumeSrc.resume()
+}
+
+// MARK: - Audio device / configuration change recovery
+//
+// Re-establish mic capture after an audio device or format change mid-recording
+// (e.g. plugging in HDMI, a USB interface, or AirPods). On a configuration
+// change AVAudioEngine stops itself and the input format can change out from
+// under the existing tap; without re-reading the format, re-tapping, and
+// restarting, the mic tap silently stops firing for the rest of the session
+// while ScreenCaptureKit (system audio) keeps running — the failure that
+// produced a 3-minute mic stream alongside an 85-minute system stream. The
+// notification's object is our engine; `.main` delivery serialises recovery
+// with pause/resume/shutdown.
+func reconfigureMicAfterDeviceChange() {
+    let input = engine.inputNode
+    input.removeTap(onBus: 0)
+    let newFormat = input.inputFormat(forBus: 0)
+    guard newFormat.sampleRate > 0, newFormat.channelCount > 0 else {
+        // The tap is off and no new one goes on. Don't keep the old name — the
+        // heartbeat would report a device capture has stopped using — but don't
+        // clear it either: the system default is a *fresh* answer, and it names
+        // the device the user actually has to go and change.
+        inputDevice.set(resolveDefaultInputDeviceName())
+        emitError("Audio device changed but the new microphone format is unavailable; mic capture did not resume.")
+        return
+    }
+    micTiming.openInterval("device_change")
+    installMicTap(input, format: newFormat)
+    // While paused the engine is intentionally stopped — resumeCapture() starts
+    // it later, now against the freshly-installed tap. Only restart here if we
+    // were actively recording when the device changed.
+    if !paused {
+        do {
+            engine.prepare()
+            try engine.start()
+        } catch {
+            emitError("Failed to restart microphone after device change: \(error.localizedDescription)")
+            return
+        }
+    }
+    // The device rides its own field rather than being interpolated into
+    // `message`: the Rust side logs `message` verbatim to stderr, and a device
+    // name is display-only (it routinely contains a real person's name). The
+    // toast text is composed there from the two parts.
+    var payload: [String: Any] = [
+        "event": "diagnostic",
+        "message": "Audio input device changed; microphone capture resumed.",
+    ]
+    if let device = inputDevice.get() { payload["input_device"] = device }
+    emit(payload)
+}
+
+if !isImport {
+    NotificationCenter.default.addObserver(
+        forName: .AVAudioEngineConfigurationChange,
+        object: engine,
+        queue: .main
+    ) { _ in
+        reconfigureMicAfterDeviceChange()
+    }
+}
+
+// MARK: - Parent-death watchdog
+//
+// The helper remains a child of the app so TCC can attribute recording access
+// to the responsible HoneyVoice app. Parent exit can still orphan the child;
+// detect that without detaching or changing its permission identity.
+//
+// Poll PPID every 2 s. If we see PID 1 as our parent, the launcher is gone
+// and we should exit so the next launch starts cleanly without a zombie
+// sidecar holding onto the mic.
+let originalParentPid = getppid()
+let parentWatchdog = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "parent.watchdog"))
+parentWatchdog.schedule(deadline: .now() + 2, repeating: 2)
+parentWatchdog.setEventHandler {
+    let current = getppid()
+    if current == 1 || (originalParentPid != 1 && current != originalParentPid) {
+        exit(0)
+    }
+}
+if !isImport {
+    parentWatchdog.resume()
+}
+
+// MARK: - Signal handling: SIGTERM / SIGINT → finalize
+
+let sigSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+let sigSource2 = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+signal(SIGTERM, SIG_IGN)
+signal(SIGINT, SIG_IGN)
+
+let shutdown: () -> Void = {
+    Task {
+        // Close all writers FIRST, before any async cleanup that
+        // might block. ScreenCaptureKit's `stopCapture()` has been
+        // observed to take multiple seconds — if we await it before
+        // closing the writers, the parent's SIGTERM grace window can
+        // expire and SIGKILL truncates this process before any
+        // `chunk` / `full_recording` / `stopped` events reach
+        // stdout. That manifests on the user's side as "the last
+        // 20–30 s of audio never gets transcribed" because the
+        // chunks for that tail were ready to emit but never did.
+        // engine.stop() is synchronous and returns immediately;
+        // ChunkWriter.close() is also synchronous (queue.sync).
+        engine.stop()
+        micFullWriter.close()
+        sysFullWriter.close()
+        micWriter.close()
+        sysWriter.close()
+        releaseSystemAwake()
+        emitCaptureTiming()
+        emit(["event": "stopped"])
+        // Now best-effort SCK shutdown for cleanliness. If it stalls,
+        // we've already emitted everything the parent needs and the
+        // OS will reclaim resources on exit.
+        if let s = scStream {
+            try? await s.stopCapture()
+        }
+        // Final only once capture has stopped. stderr, because the parent
+        // stops reading stdout at `stopped`.
+        let late = (mic: micFullWriter.lateWriteCount(), sys: sysFullWriter.lateWriteCount())
+        if late.mic + late.sys > 0 {
+            FileHandle.standardError.write(Data(
+                "capture timing: \(late.mic) mic / \(late.sys) sys buffer(s) reached a full-recording writer after it closed; dropped\n".utf8
+            ))
+        }
+        exit(0)
+    }
+}
+
+sigSource.setEventHandler(handler: shutdown)
+sigSource2.setEventHandler(handler: shutdown)
+if !isImport {
+    sigSource.resume()
+    sigSource2.resume()
+}
+
+// MARK: - Import replay
+//
+// Decode the source file to PCM, resample each block to the target 16 kHz
+// mono format via AVAudioConverter, and feed the SAME mic writers as live
+// capture. Runs at full speed (no realtime pacing) — the OS/disk buffers the
+// per-chunk WAVs and the Rust reader applies a bounded-backlog semaphore so a
+// fast replay can't swamp the transcribe queue. On completion it closes the
+// writers (emitting the final chunk + `full_recording`), emits `stopped`, and
+// exits. Only the mic writers are touched, so the Rust side sees a mic-only
+// session and runs the mic-only diarize branch — exactly what we want.
+func runImport(_ path: String) {
+    let url = URL(fileURLWithPath: path)
+    let file: AVAudioFile
+    do {
+        file = try AVAudioFile(forReading: url)
+    } catch {
+        emitError("import open \(url.lastPathComponent): \(error.localizedDescription)")
+        emit(["event": "stopped"])
+        exit(1)
+    }
+
+    let inFormat = file.processingFormat
+    guard let converter = AVAudioConverter(from: inFormat, to: targetFormat) else {
+        emitError("import: could not build converter from \(inFormat)")
+        emit(["event": "stopped"])
+        exit(1)
+    }
+
+    // Read/convert in ~1 s blocks. Block size is at the source rate; the
+    // converter downmixes to mono and resamples to 16 kHz in one pass.
+    let blockFrames = AVAudioFrameCount(max(inFormat.sampleRate, 16_000))
+    // Track whether we've read any audio yet. AVAudioFile.read(into:) is known
+    // to throw `_GenericObjCError error 0` at/near the end of some compressed
+    // files (m4a/mp4/aac) instead of cleanly returning frameLength == 0. Once
+    // we've already read at least one block, treat that throw as end-of-stream
+    // rather than surfacing a scary error toast for an import that succeeded.
+    var readAnyFrames = false
+    while true {
+        guard let inBuf = AVAudioPCMBuffer(pcmFormat: inFormat, frameCapacity: blockFrames) else { break }
+        do {
+            try file.read(into: inBuf)
+        } catch {
+            // Distinguish the benign AVAudioFile tail quirk from genuine
+            // mid-file decode corruption by read position. `read(into:)` is
+            // known to throw at/near the end of some compressed files instead
+            // of cleanly returning frameLength == 0 — that throw lands within
+            // ~one block of file.length. A throw well *before* the end means
+            // the file failed to decode mid-stream, so treating it as clean
+            // EOF would silently import a truncated file (exit 0, "stopped",
+            // no error) while the user believes the whole file came in.
+            // Surface those as a real error; keep the tail quirk silent.
+            let atTail = file.framePosition >= file.length - Int64(blockFrames)
+            if readAnyFrames && atTail { break } // tail-read quirk → EOF
+            emitError("import read: \(error.localizedDescription)")
+            break
+        }
+        if inBuf.frameLength == 0 { break } // EOF
+        readAnyFrames = true
+
+        let ratio = targetSampleRate / inFormat.sampleRate
+        let cap = AVAudioFrameCount(Double(inBuf.frameLength) * ratio + 1024)
+        guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: cap) else { break }
+        var convErr: NSError?
+        var supplied = false
+        let status = converter.convert(to: out, error: &convErr) { _, s in
+            if supplied { s.pointee = .noDataNow; return nil }
+            supplied = true
+            s.pointee = .haveData
+            return inBuf
+        }
+        if status == .error {
+            emitError("import convert: \(convErr?.localizedDescription ?? "unknown")")
+            break
+        }
+        if out.frameLength > 0, let chans = out.floatChannelData {
+            let n = Int(out.frameLength)
+            let arr = Array(UnsafeBufferPointer(start: chans[0], count: n))
+            if let buf = makeBuffer(arr) {
+                micWriter.write(buf)
+                micFullWriter.write(buf)
+            }
+        }
+    }
+
+    micWriter.close()
+    micFullWriter.close()
+    emit(["event": "stopped"])
+    exit(0)
+}
+
+if let importPath = importPath {
+    runImport(importPath)
+} else {
+    RunLoop.main.run()
+}

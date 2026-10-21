@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.miraphant.voice-memory</string>
+	<key>CFBundleName</key>
+	<string>HoneyVoice</string>
+	<key>CFBundleDisplayName</key>
+	<string>HoneyVoice</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>HoneyVoice records your microphone during meetings to transcribe and summarize them.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>HoneyVoice captures system audio from your meetings. No video is recorded.</string>
+</dict>
+</plist>

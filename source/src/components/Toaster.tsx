@@ -1,0 +1,83 @@
+import { useNavigate } from "react-router-dom";
+import { useRecordingStore } from "../lib/store";
+import { useT } from "../lib/locale";
+import { diarizationNoticesZhCN } from "../lib/productLocale";
+
+export function Toaster() {
+  const t = useT();
+  const errors = useRecordingStore((s) => s.errors);
+  const flashes = useRecordingStore((s) => s.flashes);
+  const dismissError = useRecordingStore((s) => s.dismissError);
+  const dismissFlash = useRecordingStore((s) => s.dismissFlash);
+  const navigate = useNavigate();
+
+  if (errors.length === 0 && flashes.length === 0) return null;
+
+  return (
+    <div className="no-drag fixed bottom-24 right-6 z-[60] flex flex-col gap-2 max-w-sm">
+      {errors.map((e) => {
+        // The backend routes some informational notices through the
+        // recording_error channel (it has no severity field yet). The
+        // cross-session speaker-unification notice is one of them — it's a
+        // "heads up, here's what I merged; rename to adjust", not a failure.
+        // Detect it by message shape and render it neutrally rather than as a
+        // red error. (A backend severity field would be the cleaner fix.)
+        const isNotice = /^Speaker unification detected/.test(e.message);
+        return (
+        <div
+          key={`err-${e.id}`}
+          className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)] shadow-md text-sm"
+        >
+          <div className="flex-1">
+            <div
+              className={
+                isNotice
+                  ? "font-medium text-[var(--color-text)] mb-1"
+                  : "font-medium text-red-600 dark:text-red-400 mb-1"
+              }
+            >
+              {t(isNotice
+                ? "Speakers merged"
+                : e.kind === "summary"
+                  ? "Summary failed"
+                  : e.kind === "title"
+                    ? "Couldn’t write a title"
+                    : "Recording issue")}
+            </div>
+            <div className="text-[var(--color-text)]">{Object.hasOwn(diarizationNoticesZhCN, e.message) ? t(e.message) : e.message}</div>
+            {/* Copy-coupled: error messages that mention "permission" or
+                "Settings" (see Note.tsx's record pre-flight and the backend's
+                recording_error strings) get a shortcut into Settings. */}
+            {/permission|settings|权限|设置/i.test(e.message) && (
+              <button
+                onClick={() => { navigate("/settings"); dismissError(e.id); }}
+                className="mt-2 text-xs underline text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                {t("Open Settings")}
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => dismissError(e.id)}
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            aria-label={t("Dismiss")}
+          >×</button>
+        </div>
+        );
+      })}
+      {flashes.map((f) => (
+        <div
+          key={`flash-${f.id}`}
+          className="flex items-center gap-3 px-4 py-2 rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)] shadow-md text-sm text-[var(--color-text)]"
+        >
+          <div className="flex-1">{f.message}</div>
+          <button
+            onClick={() => dismissFlash(f.id)}
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            aria-label={t("Dismiss")}
+          >×</button>
+        </div>
+      ))}
+    </div>
+  );
+}

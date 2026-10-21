@@ -1,0 +1,29 @@
+{
+  "dataset": "AISHELL/AISHELL-3",
+  "revision": "f20d5db4a31fe779ef07bb1af4ea92da5c786622",
+  "source": "https://www.openslr.org/93/",
+  "repository": "https://huggingface.co/datasets/AISHELL/AISHELL-3",
+  "license": "Apache-2.0",
+  "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0",
+  "attribution": "AISHELL-3, Beijing Shell Shell Technology Co., Ltd.; Yao Shi, Hui Bu, Xin Xu, Shaoji Zhang, Ming Li, 2020, https://arxiv.org/abs/2010.11567",
+  "selection": "First six lexicographically ordered test utterances from each of SSB0009 and SSB0011, selected before inference, not by model results.",
+  "modifications": "Resample to mono 16 kHz PCM16; concatenate three different utterances per turn with 150 ms gaps, then alternate A/B/A/B with 600 ms gaps. No voice conversion or repeated audio. Temporary audio is not redistributed.",
+  "speakers": [
+    {"id": "SSB0009", "files": [
+      {"name": "SSB00090030.wav", "bytes": 131792, "sha256": "82521b2c22489f43ca8353065dbe3fd75c4695d49e0dddda01fa98338e6d120f"},
+      {"name": "SSB00090138.wav", "bytes": 136490, "sha256": "635aaffd261f53012a4ad892dadbee52d928efc2b176b769df9fd9d73a0238d1"},
+      {"name": "SSB00090164.wav", "bytes": 114266, "sha256": "bfae783ce9fea1e08897874822cd762b7d8280c59f807fbeca2694263b7c0505"},
+      {"name": "SSB00090176.wav", "bytes": 118754, "sha256": "90cb728ca2764a36c6d5acb86ec7eb9d8c41f506e7759649e65c41e09d7a9230"},
+      {"name": "SSB00090179.wav", "bytes": 99630, "sha256": "218e2beb6e86ec2b9534273b18a28e98c4fa382acb613122d04f81dd28fd14e3"},
+      {"name": "SSB00090221.wav", "bytes": 92212, "sha256": "2ebef14c9ba68c921b10ce7623d21cea22830bffdaf87f550844eb575de4d72e"}
+    ]},
+    {"id": "SSB0011", "files": [
+      {"name": "SSB00110049.wav", "bytes": 132166, "sha256": "2d4a973bf27442d240673e73dbb7ef601511cdecfdd75cdbc8deb45d960ba841"},
+      {"name": "SSB00110115.wav", "bytes": 136490, "sha256": "c23a7370e45a3bcbfa317cf3821916b970a65e19ecc731b13a45583db8cbe3dd"},
+      {"name": "SSB00110264.wav", "bytes": 132696, "sha256": "86c9b5987dfbaed9fde05e3179f73f7d709ecf95e9a61b1882bb8b3eb9045af9"},
+      {"name": "SSB00110344.wav", "bytes": 130756, "sha256": "c0b8037730dae7dc4d81d092d9bbc531e3b536a8964abef38ca46353958e8c2a"},
+      {"name": "SSB00110403.wav", "bytes": 135168, "sha256": "2c3876eef540758dc88961de83aae1c5009b6bbc0d54ec8266d7d54e1e388feb"},
+      {"name": "SSB00110457.wav", "bytes": 136402, "sha256": "fdedb2cabf790f91a2d95ebe709c392475dd9cd5bba492fb6971329005edff9d"}
+    ]}
+  ]
+}

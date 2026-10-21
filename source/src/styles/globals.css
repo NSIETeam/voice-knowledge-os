@@ -1,0 +1,999 @@
+@import "tailwindcss";
+@import "tippy.js/dist/tippy.css";
+
+/* Themes. Each file declares the whole token contract (src/lib/themeContract.ts)
+   for its own `data-palette` value and nothing else — no component rules. The
+   structural CSS below reads only contract tokens, which is what lets a theme
+   restate the typeface, type scale and control metrics without touching a
+   component. See src/styles/themes/README.md for how to add one. */
+@import "./themes/warm.css";
+@import "./themes/graphite.css";
+
+/* The @theme block is Tailwind's utility generator, not the source of truth for
+   any value: `font-sans`, `font-code` and `rounded-card` exist as utilities
+   because these names are here. The values are the default theme's, and every
+   theme file overrides them — theme files are unlayered, so they outrank
+   `@layer theme` whatever the source order.
+
+   --font-serif and --font-mono are transition aliases pointing at the same
+   stack as --font-sans, so any lingering `font-serif` / `font-mono` class
+   renders the theme's sans rather than a stray typeface. Genuine code blocks
+   use --font-code. */
+
+@theme {
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-sans);
+  --font-mono: var(--font-sans);
+  --font-code: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --radius-card: 14px;
+}
+
+/* Wrap base resets in @layer base so Tailwind utilities (which live in
+   @layer utilities) can override them via the layer cascade. Unlayered
+   rules win over ANY @layer regardless of selector specificity, which
+   was masking text-color utilities on form controls — most visibly the
+   "Install & Restart" button rendering black-on-black. */
+@layer base {
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: var(--color-canvas);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  button { font-family: inherit; color: inherit; }
+
+  input, textarea {
+    font-family: inherit;
+    color: inherit;
+    outline: none;
+  }
+
+  /* Default form-control surface. Inputs stay transparent (they're often
+     embedded in styled containers) but textareas always read as form
+     fields. */
+  input { background: transparent; }
+}
+
+textarea {
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  transition: border-color 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+textarea:focus {
+  border-color: var(--color-text-muted);
+}
+
+/* Transcript textarea is rendered inside a Card, which already provides the
+   surface. Opt out via .nd-bare. */
+.nd-bare {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* The chat composer's field on the `/chat` page, where the composer BOX is the
+   surface (#95). The `textarea` rule above is unlayered, so it outranks
+   every Tailwind utility — a field inside a styled container has to opt out with
+   a rule of the same kind, and set its own padding while it's there. The right
+   inset is the room the send button needs; without it long text slides under the
+   button. `.nd-bare` is the wrong tool here: its `padding: 0 !important` would
+   beat any padding we then asked for. */
+.nd-chat-input {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 8px 44px 8px 8px;
+}
+
+textarea { resize: none; }
+
+/* Scrolls without advertising it. For surfaces that auto-scroll and are read
+   rather than navigated — the chat log, whose bar would otherwise sit on top of
+   the answer's citation chips (#95). Not for lists the user has to explore:
+   there, the bar is the only hint there's more. */
+.nd-scroll-hidden { scrollbar-width: none; -ms-overflow-style: none; }
+.nd-scroll-hidden::-webkit-scrollbar { display: none; }
+
+input::placeholder, textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* UI helpers ---------------------------------------------------------------
+   Use .nd-label for section/group micro-labels (Hanken 600, lightly tracked
+   uppercase — the "FOLDERS" / "TODAY" caption style from the prototype). Use
+   .nd-chip for tags, statuses, and pickers — a 1px-bordered pill with no
+   fill. */
+.nd-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-label-size);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-disabled);
+  line-height: 1.2;
+}
+
+/* Speaker label pill — small filled chip used in the rename strip
+   above the transcript. Colour is set per-speaker via inline style;
+   we cycle through the four semantic colours in first-encounter
+   order so each note has a stable visual mapping. */
+.nd-speaker-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+/* Speaker dot — compact gutter marker used inside the transcript
+   body. Lives in a left margin via absolute positioning so the text
+   column starts at column 0 (matches the textarea wrap when the
+   user clicks to edit). Click target is generous via a transparent
+   ::before so the 10 px visual still has a 32 px hit area. */
+.nd-speaker-dot {
+  position: absolute;
+  /* `left: 0`, NOT a negative gutter offset. The dot used to hang at -16px,
+     outside its line box, which worked only where the caller supplied its own
+     gutter. In the styled reader it sat inside a scroll container
+     (`overflow-y-auto`), and CSS resolves the other axis of a scroll container
+     to `auto` rather than `visible` — so every dot was clipped away and a
+     transcript rendered with no speaker markers at all. Notes recorded on this
+     device took the player path and looked fine; a teammate's note, whose
+     timeline may not be local, fell to the styled reader and looked
+     speaker-less.
+     Both callers now give the dot a real gutter column to sit in, so `left: 0`
+     positions it inside that column and nothing can clip it. */
+  left: 0;
+  /* Centre on the *first* line of the turn (not the full multi-line
+     block) by anchoring to one line-height in `lh` units, then
+     shifting up by half the dot diameter. Beats `em`-based math
+     because `lh` already accounts for the parent's `line-height`,
+     including the `leading-relaxed` (1.625) we use here. */
+  top: calc(0.5lh - 5px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  transition: transform 120ms cubic-bezier(0.25, 0.1, 0.25, 1),
+              opacity 120ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.nd-speaker-dot::before {
+  content: "";
+  position: absolute;
+  inset: -11px;
+}
+
+.nd-speaker-dot:hover {
+  transform: scale(1.25);
+}
+
+.nd-speaker-dot:disabled {
+  cursor: default;
+}
+
+.nd-speaker-dot:disabled:hover {
+  transform: none;
+}
+
+.nd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--color-line-visible);
+  border-radius: 999px;
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  line-height: 1.2;
+  transition: color 200ms cubic-bezier(0.25, 0.1, 0.25, 1),
+              border-color 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.nd-chip:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-muted);
+}
+
+.nd-chip[aria-pressed="true"],
+.nd-chip.is-active {
+  color: var(--color-text-display);
+  border-color: var(--color-text-display);
+}
+
+/* Solid action buttons — the redesign's primary chrome (note toolbar, list
+   headers). .nd-btn = secondary (surface + hairline border); .nd-btn-primary
+   = accent fill; .nd-btn-icon = icon-only button with an active
+   (accent-soft) state.
+
+   Every metric is a contract token, so a theme sets the whole control language
+   in one place: `warm` keeps the 32px pill, `graphite` states a 38px bar. The
+   height is explicit rather than padding-derived precisely so a theme can name
+   it. */
+.nd-btn {
+  display: inline-flex; align-items: center; gap: var(--icon-gap);
+  font-size: var(--text-ui-size); font-weight: 500; line-height: 1.2;
+  height: var(--control-height);
+  padding: 0 var(--control-pad-x);
+  border-radius: var(--control-radius);
+  border: 1px solid var(--color-line-visible);
+  background: var(--color-surface); color: var(--color-text);
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: border-color 140ms cubic-bezier(0.25,0.1,0.25,1),
+              background-color 140ms cubic-bezier(0.25,0.1,0.25,1),
+              opacity 140ms cubic-bezier(0.25,0.1,0.25,1);
+}
+.nd-btn:hover:not(:disabled) { border-color: var(--color-text-muted); }
+.nd-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* The primary button is the one a theme may give a fixed width, so it centres
+   its label and can shrink below that width rather than overflow a narrow panel.
+   Secondary buttons keep hugging their label.
+   --control-min-width is therefore a LENGTH in every theme, `0px` where the
+   button should hug: `min()` rejects `auto`, and a theme that wrote `auto` would
+   be relying on the whole declaration being dropped as invalid. */
+.nd-btn-primary {
+  background: var(--color-accent); border-color: var(--color-accent);
+  color: var(--color-on-accent);
+  justify-content: center;
+  min-width: min(var(--control-min-width), 100%);
+}
+.nd-btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-2); border-color: var(--color-accent-2);
+}
+.nd-btn-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--icon-btn-size); height: var(--icon-btn-size);
+  padding: 0; border-radius: var(--control-radius);
+  border: 1px solid transparent; background: transparent;
+  color: var(--color-icon); cursor: pointer; flex-shrink: 0;
+  transition: color 140ms, background-color 140ms, border-color 140ms;
+}
+.nd-btn-icon:hover { background: var(--color-pill-hover); color: var(--color-text); }
+.nd-btn-icon.is-active {
+  background: var(--color-accent-soft); border-color: transparent;
+  color: var(--color-accent-text);
+}
+/* Smaller icon-button variant for secondary/inline affordances. */
+.nd-btn-icon-sm {
+  width: calc(var(--icon-btn-size) - 5px);
+  height: calc(var(--icon-btn-size) - 5px);
+}
+/* Chrome glyphs take the theme's icon size, overriding the per-call `size`
+   prop lucide writes as width/height attributes (CSS beats a presentation
+   attribute). Only the uniform chrome slots do this — icons that carry a
+   deliberate one-off size (a 10px chevron, a 12px checkmark inside a custom
+   control) are not in one of these slots. */
+.nd-btn-icon > svg,
+.nd-navrow > svg,
+.nd-bar > svg {
+  width: var(--icon-size);
+  height: var(--icon-size);
+}
+
+/* Meta-bar item (note identity row) — borderless, icon + label, hover tint
+   on the interactive ones (folder, workspace pickers). */
+.nd-meta {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--color-text-muted);
+  padding: 5px 8px; border-radius: var(--radius);
+  white-space: nowrap;
+  transition: background-color 120ms, color 120ms;
+}
+.nd-meta.is-interactive { cursor: pointer; }
+.nd-meta.is-interactive:hover { background: var(--color-pill-hover); color: var(--color-text); }
+.nd-meta > svg { opacity: 0.72; flex-shrink: 0; color: var(--color-icon); }
+
+
+/* Filled variant, for a chip that has to hold its own on a card rather than
+   sit under a line of metadata. A transparent chip needs surrounding text to
+   read as inset — in a left-aligned row of nothing else (the Summary and
+   Transcript panel pickers) it just looks like indented prose until you hover
+   it. `surface-2` is the recessed-chip step below the panel's own `surface`,
+   in both themes; hover lifts to `surface-raised`. */
+.nd-meta.is-filled { background: var(--color-surface-2); }
+.nd-meta.is-filled:hover { background: var(--color-surface-raised); color: var(--color-text); }
+
+/* Selected variant, for a chip that is narrowing what the view shows. Accent
+   fill over `surface-2`: a filter that is hiding notes must not read as the
+   resting state, which a step on the elevation ladder alone doesn't manage. */
+.nd-meta.is-selected,
+.nd-meta.is-selected:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+.nd-meta.is-selected > svg { color: var(--color-accent-text); opacity: 1; }
+
+/* Theme-driven chrome lives in @layer components, NOT unlayered like
+   .nd-btn above: these are component defaults a caller is expected to nudge
+   with a Tailwind utility (a row that needs `pr-1` for its trailing icon
+   button). An unlayered rule beats every utility regardless of specificity,
+   so the same class written unlayered would silently swallow that `pr-1`. */
+@layer components {
+  /* ------------------------------------------------------------------ */
+  /* Theme-driven chrome: type, nav rows, bars, badges                  */
+  /*                                                                    */
+  /* These exist so the metrics a design recipe actually names — title   */
+  /* size, nav row height, bar height and radius, badge shape — have one */
+  /* place to land. Each reads only contract tokens, so a theme restates */
+  /* them without a component edit. See src/styles/themes/README.md.     */
+  /* ------------------------------------------------------------------ */
+
+  /* The note title: the largest type in the app. */
+  .nd-title {
+    font-size: var(--text-title-size);
+    font-weight: var(--text-title-weight);
+    line-height: var(--text-title-line);
+    letter-spacing: var(--text-title-tracking);
+    color: var(--color-text-display);
+  }
+
+  /* A view's h1 (All notes, Folder, Chat). One step below the note title in
+     `warm`; the same size in themes whose recipe names a single heading size. */
+  .nd-heading {
+    font-size: var(--text-heading-size);
+    font-weight: var(--text-title-weight);
+    line-height: 1.2;
+    letter-spacing: var(--text-title-tracking);
+    color: var(--color-text-display);
+  }
+
+  /* A navigation row: sidebar items, folder rows, conversation rows. Height is a
+     minimum, not a fix — a row that wraps grows rather than clipping its label. */
+  .nd-navrow {
+    display: flex;
+    align-items: center;
+    gap: var(--icon-gap);
+    min-height: var(--nav-row-height);
+    padding: 0 10px;
+    border-radius: var(--nav-radius);
+    font-size: var(--nav-label-size);
+    color: var(--color-text-muted);
+    transition: background-color 120ms, color 120ms;
+  }
+  .nd-navrow:hover { background: var(--color-pill-hover); color: var(--color-text); }
+  .nd-navrow.is-active { background: var(--color-sidebar-active); color: var(--color-text); }
+
+  /* A full-width input bar: the sidebar's search field and its inline-rename
+     siblings. Distinct from a control (.nd-btn) because a theme may size the two
+     differently — graphite's recipe names bars at 38px and nav rows at 28px. */
+  .nd-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--icon-gap);
+    height: var(--bar-height);
+    padding-left: var(--bar-pad-left);
+    padding-right: var(--bar-pad-left);
+    border-radius: var(--bar-radius);
+    border: 1px solid var(--color-line-visible);
+    background: var(--color-surface);
+    transition: border-color 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+  .nd-bar:focus-within { border-color: var(--color-text-muted); }
+
+  /* A status badge — a filled, non-interactive label. Its own colour pair rather
+     than the accent's, because a badge marks state, not action. */
+  .nd-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: var(--badge-height);
+    padding: 0 7px;
+    border-radius: var(--badge-radius);
+    background: var(--color-badge-bg);
+    border: 1px solid var(--color-badge-border);
+    color: var(--color-badge-text);
+    font-size: var(--text-label-size);
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  /* A shell command or config stanza — the one place --font-code and
+     --text-code-size are the point rather than an afterthought.
+     --text-code-size tracks the SMALL PRINT a command sits under (12px, the
+     `text-xs` every settings description and mono detail uses), not the body
+     size: a monospace face at the same nominal size as the sans reads larger,
+     so matching body would make the command the loudest thing in the panel. */
+  .nd-code {
+    font-family: var(--font-code);
+    font-size: var(--text-code-size);
+    line-height: 1.5;
+  }
+
+  /* Vertical rhythm for a list of rows, and the min-height of a two-line content
+     row (a note in a list). Both are minimums. */
+  .nd-list { display: flex; flex-direction: column; gap: var(--row-gap); }
+  .nd-row { min-height: var(--row-height); }
+  .nd-row-lg { min-height: var(--row-height-lg); }
+
+  /* ---- the note grid ------------------------------------------------- */
+
+  /* A recessed ground for borderless cards to sit on. A card's edge is
+     entirely tone against what it sits on, and graphite declares
+     --color-canvas and --color-surface both as #ffffff. */
+  .nd-well {
+    --well: color-mix(in srgb, #000 4.5%, var(--color-canvas));
+    background: var(--well);
+    /* <main> sits in the layout's 6px gutter beside the rounded nav card. */
+    border-radius: var(--radius-card);
+  }
+
+  /* Floating chrome over a well: the grid scrolls underneath it, and the
+     content edge is a short fade rather than a divider. */
+  .nd-well-bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: color-mix(in srgb, var(--well) 72%, transparent);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+  .nd-well-bar::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 22px;
+    background: linear-gradient(var(--well), transparent);
+    pointer-events: none;
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .nd-well-bar { background: var(--well); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  }
+
+  .nd-notegrid {
+    display: grid;
+    /* min() so the track floor collapses with the container: a bare
+       minmax(300px, 1fr) cannot shrink past its floor, and the grid overflows
+       sideways once the body column is narrower than one card. */
+    grid-template-columns: repeat(auto-fill, minmax(min(var(--card-min, 300px), 100%), 1fr));
+    gap: 14px;
+  }
+
+  /* One note. Borderless: depth comes from tone and shadow. */
+  .nd-notecard {
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-card);
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms ease-out,
+      background-color 140ms ease-out;
+    animation: nd-notecard-in 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  .nd-notecard:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card), 0 12px 26px -18px rgba(0, 0, 0, 0.45);
+  }
+  /* Feedback on the press itself, not on release. The link fills the card, so
+     the press and the focus ring are matched from the surface. */
+  .nd-notecard:has(a:active) {
+    transform: scale(0.988);
+    transition-duration: 90ms;
+  }
+  .nd-notecard:has(:focus-visible) {
+    outline: 2px solid var(--color-accent-text);
+    outline-offset: 2px;
+  }
+
+  /* Selected. --color-accent-soft is tuned against the canvas, and graphite's
+     lands darker than the well, so the fill alone cannot carry this. */
+  .nd-notecard[data-selected="true"] {
+    background: var(--color-accent-soft);
+    box-shadow: 0 0 0 2px var(--color-accent-text);
+  }
+  .nd-notecard[data-selected="true"]:hover {
+    box-shadow: 0 0 0 2px var(--color-accent-text), 0 12px 26px -18px rgba(0, 0, 0, 0.45);
+  }
+
+  /* A short entrance stagger over the first row or two, written out because
+     CSS cannot count siblings into a delay. */
+  .nd-notegrid > :nth-child(2) { animation-delay: 20ms; }
+  .nd-notegrid > :nth-child(3) { animation-delay: 40ms; }
+  .nd-notegrid > :nth-child(4) { animation-delay: 60ms; }
+  .nd-notegrid > :nth-child(5) { animation-delay: 80ms; }
+  .nd-notegrid > :nth-child(6) { animation-delay: 100ms; }
+  .nd-notegrid > :nth-child(7) { animation-delay: 120ms; }
+  .nd-notegrid > :nth-child(8) { animation-delay: 140ms; }
+  .nd-notegrid > :nth-child(9) { animation-delay: 160ms; }
+  .nd-notegrid > :nth-child(10) { animation-delay: 180ms; }
+
+  @keyframes nd-notecard-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* The card asks tone and shadow to carry its edge, which is the thing this
+     preference asks us to stop doing. Give it a real border instead. */
+  @media (prefers-contrast: more) {
+    .nd-well { background: var(--color-canvas); }
+    .nd-notecard {
+      border: 1px solid var(--color-line-visible);
+      box-shadow: none;
+    }
+    .nd-notecard:hover { box-shadow: none; }
+    .nd-notecard[data-selected="true"] {
+      border-color: var(--color-accent-text);
+      box-shadow: 0 0 0 1px var(--color-accent-text);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nd-notecard {
+      animation-name: nd-notecard-fade;
+      transition: box-shadow 160ms ease, background-color 140ms ease;
+    }
+    .nd-notecard:hover, .nd-notecard:has(a:active) { transform: none; }
+    @keyframes nd-notecard-fade { from { opacity: 0; } to { opacity: 1; } }
+  }
+
+  /* A full progress fill for work whose length can't be known — the diarize
+     sidecar reports no progress, so the bar stays full and shimmers. The
+     highlight mixes from --color-on-accent because it travels across the
+     accent fill, not across the page. */
+  .nd-progress-indeterminate {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--color-on-accent) 45%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nd-progress-indeterminate { animation: none; }
+  }
+}
+
+/* No <select> rules live here any more: every picker in the app goes through
+   the Radix-backed Popover / Menu / Select primitives (#114), so the chrome
+   resets and the hand-drawn caret that used to fight WebKit are gone with the
+   native elements they patched. */
+
+.drag { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+/* Per-word highlight in the playback transcript view. The whole row
+ * inherits `text-[var(--color-text-muted)]` from the container, so
+ * each word stays muted by default. The active word brightens to the
+ * full text colour with a touch of weight emphasis — reads as a
+ * spotlight without breaking the line shape. No CSS transitions: the
+ * rAF loop snaps `currentMs` to the exact word boundary, and any
+ * easing here would re-introduce the mushy lag we just removed. */
+.nd-word {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.nd-word:hover {
+  background: var(--color-pill-hover);
+}
+.nd-word-active {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-text) 12%, transparent);
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* A resting fill with a brighter sweep travelling across it.
+   NOT --color-pill for the base: that token is transparent by design, so the
+   old `pill → pill-hover → pill` gradient painted 5% ink at its midpoint and
+   nothing at all either side — a skeleton you could not see on any theme.
+   Both stops mix from --color-text, so this inverts with the theme for free. */
+.skeleton {
+  background-color: color-mix(in srgb, var(--color-text) 7%, transparent);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-text) 9%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: shimmer 1.6s ease-in-out infinite;
+  border-radius: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still a placeholder, just a still one — the gradient reads as "pending"
+     without the travel. */
+  .skeleton { animation: none; }
+}
+
+@keyframes recording-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(1.15); }
+}
+
+.rec-dot {
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The dot's colour is what says "live"; the pulse only draws the eye to it. */
+  .rec-dot { animation: none; }
+}
+
+/* Floating recording-bar pills (status · controls · busy). A soft drop
+   shadow lifts them off the note body; in dark they step one rung up the
+   elevation ladder to --color-surface-raised so they stay distinct from
+   the canvas behind them. */
+.nd-recpill {
+  background: var(--color-surface);
+  box-shadow: 0 14px 36px -18px rgba(0, 0, 0, 0.42),
+              0 2px 6px -4px rgba(0, 0, 0, 0.18);
+}
+:root[data-theme="dark"] .nd-recpill { background: var(--color-surface-raised); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .nd-recpill { background: var(--color-surface-raised); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Prose styles for the Tiptap note editor + read-only blocks         */
+/* ------------------------------------------------------------------ */
+
+.prose-note {
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  letter-spacing: var(--text-body-tracking);
+  color: var(--color-text);
+}
+
+/* Reset every block's default margin so the per-block rules below can set
+   their own spacing without fighting Tailwind's preflight. Wrapped in
+   :where() so this carries zero specificity weight and never overrides the
+   rules that actually matter. */
+.prose-note :where(h1, h2, h3, h4, p, ul, ol, blockquote, pre, hr) {
+  margin: 0;
+}
+
+/* Body spacing: 1em between any two adjacent blocks of body-class content
+   (paragraphs, lists, quotes, code, dividers). Headings opt out via their
+   own larger margin-top below. */
+.prose-note p + p,
+.prose-note p + ul,
+.prose-note p + ol,
+.prose-note p + blockquote,
+.prose-note p + pre,
+.prose-note p + hr,
+.prose-note ul + p,
+.prose-note ul + ul,
+.prose-note ul + ol,
+.prose-note ul + blockquote,
+.prose-note ul + pre,
+.prose-note ul + hr,
+.prose-note ol + p,
+.prose-note ol + ul,
+.prose-note ol + ol,
+.prose-note ol + blockquote,
+.prose-note ol + pre,
+.prose-note ol + hr,
+.prose-note blockquote + p,
+.prose-note blockquote + ul,
+.prose-note blockquote + ol,
+.prose-note pre + p,
+.prose-note pre + ul,
+.prose-note pre + ol,
+.prose-note hr + p,
+.prose-note hr + ul,
+.prose-note hr + ol {
+  margin-top: 0.68em;
+}
+
+/* Headings: generous top margin so sections feel distinct, modest bottom
+   margin so the heading breathes from the body that follows. The :first-child
+   override prevents an awkward leading gap when a note opens with a heading. */
+/* The heading ladder is derived from --text-heading-size rather than written
+   out four times, so a theme states one number and the whole scale follows.
+   The ratios reproduce the shipped `warm` sizes (25 / 19.4 / 16.9 / 15.3px). */
+.prose-note h1 {
+  font-size: var(--text-heading-size);
+  line-height: 1.25;
+  font-weight: var(--text-title-weight);
+  letter-spacing: var(--text-title-tracking);
+  margin-top: 1.4em;
+  margin-bottom: 0.35em;
+}
+.prose-note h2 {
+  font-size: calc(var(--text-heading-size) * 0.775);
+  line-height: 1.3;
+  font-weight: var(--text-title-weight);
+  letter-spacing: var(--text-title-tracking);
+  margin-top: 1.3em;
+  margin-bottom: 0.3em;
+}
+.prose-note h3 {
+  font-size: calc(var(--text-heading-size) * 0.677);
+  line-height: 1.35;
+  font-weight: var(--text-title-weight);
+  margin-top: 1.15em;
+  margin-bottom: 0.3em;
+}
+.prose-note h4 {
+  font-size: calc(var(--text-heading-size) * 0.613);
+  line-height: 1.4;
+  font-weight: var(--text-title-weight);
+  margin-top: 1em;
+  margin-bottom: 0.25em;
+}
+.prose-note > :first-child {
+  margin-top: 0;
+}
+
+.prose-note ul,
+.prose-note ol {
+  padding-left: 1.5em;
+}
+.prose-note ul { list-style: disc; }
+.prose-note ol { list-style: decimal; }
+.prose-note ul li,
+.prose-note ol li { padding-left: 0.25em; }
+.prose-note li + li { margin-top: 0.3em; }
+.prose-note blockquote {
+  border-left: 3px solid var(--color-line);
+  padding-left: 1em;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+.prose-note code {
+  font-family: var(--font-code);
+  font-size: 0.9em;
+  /* `--color-pill` is transparent by design (Nothing-style chips); use
+     `--color-pill-hover`'s subtle fill so inline code/pre actually
+     reads as a distinct surface. */
+  background: var(--color-pill-hover);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.prose-note pre {
+  font-family: var(--font-code);
+  background: var(--color-pill-hover);
+  padding: 0.75em 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.9em;
+}
+.prose-note pre code {
+  background: transparent;
+  padding: 0;
+}
+.prose-note hr {
+  border: none;
+  border-top: 1px solid var(--color-line);
+  margin: 1.6em 0;
+}
+.prose-note strong { font-weight: 600; }
+.prose-note em { font-style: italic; }
+.prose-note s { text-decoration: line-through; }
+
+/* Markdown rendering for the summary card. Mirrors prose-note but tuned
+   for the smaller block of text Whisper-summary models emit. */
+.prose-summary > * + * { margin-top: 0.75em; }
+.prose-summary p { margin: 0; }
+.prose-summary strong { font-weight: 600; }
+.prose-summary em { font-style: italic; }
+.prose-summary h1,
+.prose-summary h2,
+.prose-summary h3,
+.prose-summary h4 {
+  font-family: var(--font-sans);
+  font-weight: var(--text-title-weight);
+  line-height: 1.2;
+  letter-spacing: var(--text-title-tracking);
+  margin-bottom: 0.4em;
+}
+/* Headings need extra breathing room above them. The first heading in the
+   block doesn't (the card's own padding handles it). */
+.prose-summary > h1 + *,
+.prose-summary > h2 + *,
+.prose-summary > h3 + *,
+.prose-summary > h4 + * { margin-top: 0.4em; }
+.prose-summary > * + h1,
+.prose-summary > * + h2,
+.prose-summary > * + h3,
+.prose-summary > * + h4 { margin-top: 1.6em; }
+.prose-summary > h1:first-child,
+.prose-summary > h2:first-child,
+.prose-summary > h3:first-child,
+.prose-summary > h4:first-child { margin-top: 0; }
+/* Same derived ladder as .prose-note, one step smaller — the summary sits in a
+   panel, not the page. Ratios reproduce the shipped 24 / 20 / 17.6 / 16px. */
+.prose-summary h1 { font-size: calc(var(--text-heading-size) * 0.96); }
+.prose-summary h2 { font-size: calc(var(--text-heading-size) * 0.8); }
+.prose-summary h3 { font-size: calc(var(--text-heading-size) * 0.704); }
+.prose-summary h4 { font-size: calc(var(--text-heading-size) * 0.64); }
+.prose-summary code {
+  font-family: var(--font-code);
+}
+.prose-summary ul,
+.prose-summary ol {
+  padding-left: 1.4em;
+}
+.prose-summary ul { list-style: disc; }
+.prose-summary ol { list-style: decimal; }
+.prose-summary ul li,
+.prose-summary ol li { padding-left: 0.25em; }
+.prose-summary li + li { margin-top: 0.25em; }
+.prose-summary code {
+  font-family: var(--font-code);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--color-pill-hover);
+}
+.prose-summary blockquote {
+  padding-left: 1em;
+  border-left: 3px solid var(--color-line);
+  color: var(--color-text-muted);
+}
+/* Tables come through remark-gfm. Tailwind v4 preflight strips default
+   borders and padding, so without these rules the cells collide (the cause
+   of the v0.26.3 styling bug). Wrap in a horizontal scroller in case the
+   model emits a wide table that overflows the card. */
+.prose-summary table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.875em;
+}
+.prose-summary thead th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.55em 0.85em;
+  border-bottom: 2px solid var(--color-line-visible);
+  white-space: nowrap;
+}
+.prose-summary tbody td {
+  padding: 0.55em 0.85em;
+  border-bottom: 1px solid var(--color-line-visible);
+  vertical-align: top;
+}
+.prose-summary tbody tr:last-child td { border-bottom: 0; }
+.prose-summary th:first-child,
+.prose-summary td:first-child { padding-left: 0; }
+.prose-summary th:last-child,
+.prose-summary td:last-child { padding-right: 0; }
+
+/* Reasoning trace from local LLMs (Qwen 3.5 thinking, etc). Same markdown
+   coverage as prose-summary but tuned to feel like a quiet sibling of the
+   actual summary above it: smaller, muted, tighter. Modeled on ChatGPT's
+   "thoughts" panel — no panel border, just indented muted text. Headings
+   still bold but at the body size so they don't outshout the real summary. */
+.prose-reasoning {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+.prose-reasoning > * + * { margin-top: 0.5em; }
+.prose-reasoning p { margin: 0; }
+.prose-reasoning strong { font-weight: 600; color: var(--color-text); }
+.prose-reasoning em { font-style: italic; }
+.prose-reasoning h1,
+.prose-reasoning h2,
+.prose-reasoning h3,
+.prose-reasoning h4 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.3;
+  margin-bottom: 0.3em;
+  color: var(--color-text);
+}
+.prose-reasoning > * + h1,
+.prose-reasoning > * + h2,
+.prose-reasoning > * + h3,
+.prose-reasoning > * + h4 { margin-top: 0.9em; }
+.prose-reasoning ul,
+.prose-reasoning ol {
+  padding-left: 1.2em;
+}
+.prose-reasoning ul { list-style: disc; }
+.prose-reasoning ol { list-style: decimal; }
+.prose-reasoning li + li { margin-top: 0.2em; }
+.prose-reasoning code {
+  font-family: var(--font-code);
+  font-size: 0.9em;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--color-pill-hover);
+}
+.prose-reasoning pre {
+  font-family: var(--font-code);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0.6em 0.8em;
+  border-radius: 4px;
+  background: var(--color-pill-hover);
+}
+.prose-reasoning blockquote {
+  padding-left: 0.8em;
+  border-left: 2px solid var(--color-line);
+  color: var(--color-text-muted);
+}
+.prose-reasoning table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.prose-reasoning thead th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.4em 0.7em;
+  border-bottom: 2px solid var(--color-line-visible);
+  color: var(--color-text);
+  white-space: nowrap;
+}
+.prose-reasoning tbody td {
+  padding: 0.4em 0.7em;
+  border-bottom: 1px solid var(--color-line-visible);
+  vertical-align: top;
+}
+.prose-reasoning tbody tr:last-child td { border-bottom: 0; }
+.prose-reasoning th:first-child,
+.prose-reasoning td:first-child { padding-left: 0; }
+.prose-reasoning th:last-child,
+.prose-reasoning td:last-child { padding-right: 0; }
+
+.prose-note .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  height: 0;
+}
+
+/* tippy.js defaults force a dark background and white text on every popup,
+   which fights our theme. Neutralize them and let the inner element style
+   itself with our CSS variables. */
+.tippy-box {
+  background-color: transparent;
+  color: inherit;
+}
+.tippy-box > .tippy-arrow { display: none; }
+.tippy-box[data-theme~="slash"] > .tippy-content { padding: 0; }
+.tippy-box[data-theme~="slash"] {
+  box-shadow: none;
+}
+
+/* The slash menu and bubble menu render outside the React tree (tippy
+   appends to body), so make sure they inherit the live theme variables. */
+.slash-menu,
+.tippy-box .bubble-menu {
+  color: var(--color-text);
+}
+
+kbd {
+  font-family: inherit;
+}

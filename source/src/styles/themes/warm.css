@@ -1,0 +1,244 @@
+/* ==========================================================================
+   Theme: warm — Humla's shipped design (v0.30.0 redesign).
+
+   Muted sky-blue canvas, one typeface (Hanken Grotesk), blue-gray accent. This
+   file is the reference implementation of the token contract: every value here
+   is the value the app shipped with before themes were split apart, so `warm`
+   must look pixel-identical to v0.46.
+
+   It is also the DEFAULT theme, which is why its selectors carry the
+   `:root:not([data-palette])` fallback — a document that never got the
+   attribute (an unrecognised stored value, a test renderer, the first paint
+   before hydrate runs) still gets a complete token set instead of an unstyled
+   app. No other theme file has that fallback.
+
+   Elevation ladder (dark especially): canvas (darkest) → sidebar/card bg →
+   surface (pills) → raised, with a visible warm --color-card-border on the
+   inset cards so the layers stay distinct.
+
+   Accent is a muted sky blue. Text/icons placed ON a filled accent surface use
+   --color-on-accent (dark ink). For accent-coloured text/icons/links sitting
+   on a normal surface, use --color-accent-text. Red is reserved for recording
+   (--color-record) and destructive
+   actions (--color-danger).
+   ========================================================================== */
+
+[data-palette="warm"],
+:root:not([data-palette]) {
+  /* --- shape: typeface ------------------------------------------------- */
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-code: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  /* --- shape: type scale ----------------------------------------------- */
+  --text-title-size: 30px;          /* note title */
+  --text-title-weight: 600;
+  --text-title-line: 1.18;
+  --text-title-tracking: -0.022em;
+  --text-heading-size: 25px;        /* page h1 + prose h1; h2–h4 scale off it */
+  --text-body-size: 15.5px;
+  --text-body-line: 1.5;
+  --text-body-tracking: 0em;
+  --text-ui-size: 13px;             /* buttons, controls */
+  --text-label-size: 11px;          /* .nd-label micro-caps */
+  --text-code-size: 12px;           /* command snippets */
+
+  /* --- shape: icons ----------------------------------------------------- */
+  --icon-size: 16px;
+  --icon-gap: 7px;
+  --icon-btn-size: 33px;
+
+  /* --- shape: controls -------------------------------------------------- */
+  --control-height: 32px;
+  --control-pad-x: 14px;
+  --control-radius: 999px;
+  --control-min-width: 0px;         /* 0, not auto: it is read inside min() */
+
+  /* --- shape: rows + rhythm --------------------------------------------- */
+  --row-height: 30px;               /* single-line list rows */
+  --row-height-lg: 58px;            /* two-line note-list rows */
+  --row-gap: 2px;
+  --col-gap: 6px;
+
+  /* --- shape: navigation ------------------------------------------------ */
+  --nav-row-height: 32px;
+  --nav-label-size: 13.5px;
+  --nav-radius: var(--radius);
+
+  /* --- shape: bars (search + inline input rows) ------------------------- */
+  --bar-height: 36px;
+  --bar-pad-left: 10px;
+  --bar-radius: var(--radius);
+
+  /* --- shape: badge + switch ------------------------------------------- */
+  --badge-height: 20px;
+  --badge-radius: 6px;
+  --switch-w: 38px;
+  --switch-h: 22px;
+  --switch-thumb: 16px;
+
+  /* --- shape: radii ----------------------------------------------------- */
+  --radius: 9px;
+  --radius-card: 14px;
+
+  /* --- colour: light --------------------------------------------------- */
+  --color-canvas: #f3f7fa;            /* main writing pane + gutter */
+  --color-sidebar-bg: #eaf1f5;        /* inset cards: nav + right panel */
+  --color-surface: #fbfdff;           /* pills, content surfaces */
+  --color-surface-2: #eef4f7;         /* recessed chips, scrubber */
+  --color-surface-raised: #e3edf2;    /* hover, avatars */
+  --color-sidebar-active: var(--color-surface);
+  --color-text: #202a31;
+  --color-text-display: #202a31;
+  --color-text-muted: #64737d;
+  --color-text-disabled: #9baab3;
+  --color-line: #e0e9ee;              /* hairline dividers */
+  --color-line-visible: #cbd9e1;
+  --color-card-border: #cbd9e1;       /* inset-card border */
+  --color-pill: transparent;
+  --color-pill-hover: rgba(33, 30, 23, 0.05);
+  --color-input-bg: #fbfdff;
+  --color-shadow: transparent;
+  --color-icon: var(--color-text-muted);
+
+  --color-accent: #c5dbe7;            /* muted sky-blue primary / active */
+  --color-accent-2: #abcbdc;          /* slightly deeper blue hover */
+  --color-accent-soft: #e5eff4;       /* blue-gray tint behind active states */
+  --color-on-accent: #263640;         /* dark ink on the pale-blue surface */
+  --color-accent-text: #496b80;       /* readable blue-gray for text and links */
+
+  --color-record: #cf352c;            /* red — recording indicators only */
+  --color-danger: #c4362e;            /* red — destructive actions */
+
+  --color-interactive: #557f98;       /* speaker blue + links */
+  --color-success: #5b8a45;           /* speaker green + synced */
+  --color-warning: #bd962f;           /* speaker gold + override */
+  --color-warning-text: #8a6a1a;      /* readable gold for warning-as-text (light) */
+  --color-speaker-4: #c0463f;         /* speaker red (4th, cycling) */
+
+  /* Usage-meter status colours (#69) — AAA (>=7:1) on --color-surface, the
+     panel/composer background. Warm gold + red hues darkened for the light
+     canvas; distinct from --color-warning/-danger, which don't clear AAA. */
+  --color-status-warning: #69531a;    /* 7.29:1 on #fbfdff */
+  --color-status-danger: #9f2c25;     /* 7.27:1 on #fbfdff */
+
+  --color-badge-bg: var(--color-surface);
+  --color-badge-border: var(--color-line-visible);
+  --color-badge-text: var(--color-text-muted);
+  --color-switch-on: var(--color-accent);
+
+  --color-ink: var(--color-text);
+  --color-ink-muted: var(--color-text-muted);
+
+  --shadow-card: 0 1px 2px rgba(60, 46, 18, 0.04), 0 4px 14px -10px rgba(60, 46, 18, 0.18);
+  color-scheme: light;
+}
+
+/* --- colour: dark via system ------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  [data-palette="warm"]:not([data-theme="light"]),
+  :root:not([data-palette]):not([data-theme="light"]) {
+    --color-canvas: #111a20;
+    --color-sidebar-bg: #1a2831;
+    --color-surface: #22343e;
+    --color-surface-2: #1d2d36;
+    --color-surface-raised: #2b414c;
+    --color-sidebar-active: var(--color-surface);
+    --color-text: #e4edf2;
+    --color-text-display: #e4edf2;
+    --color-text-muted: #9eafb9;
+    --color-text-disabled: #687d89;
+    --color-line: #2d414b;
+    --color-line-visible: #3d5662;
+    --color-card-border: #3d5662;
+    --color-pill: transparent;
+    --color-pill-hover: rgba(228, 237, 242, 0.06);
+    --color-input-bg: #22343e;
+    --color-shadow: transparent;
+    --color-icon: var(--color-text-muted);
+
+    --color-accent: #aecbd9;
+    --color-accent-2: #c1d9e4;
+    --color-accent-soft: #293e49;
+    --color-on-accent: #17262e;
+    --color-accent-text: #b4cfdd;
+
+    --color-record: #e5544b;
+    --color-danger: #e0564d;
+
+    --color-interactive: #9bc2d6;
+    --color-success: #8cc06f;
+    --color-warning: #ddb255;
+    --color-warning-text: #ddb255;
+    --color-speaker-4: #e07a72;
+
+    /* Usage-meter status colours (#69) — AAA (>=7:1) on --color-surface #2a2418,
+       the panel/composer background. Warm hues lightened for the dark canvas. */
+    --color-status-warning: #d3ae4c;  /* 7.28:1 on #22343e */
+    --color-status-danger: #e8a09c;   /* 7.29:1 on #22343e */
+
+    --color-badge-bg: var(--color-surface);
+    --color-badge-border: var(--color-line-visible);
+    --color-badge-text: var(--color-text-muted);
+    --color-switch-on: var(--color-accent);
+
+    --color-ink: var(--color-text);
+    --color-ink-muted: var(--color-text-muted);
+
+    --shadow-card: 0 10px 28px -14px rgba(0, 0, 0, 0.7);
+    color-scheme: dark;
+  }
+}
+
+/* --- colour: dark explicit --------------------------------------------- */
+[data-palette="warm"][data-theme="dark"],
+:root:not([data-palette])[data-theme="dark"] {
+  --color-canvas: #111a20;
+  --color-sidebar-bg: #1a2831;
+  --color-surface: #22343e;
+  --color-surface-2: #1d2d36;
+  --color-surface-raised: #2b414c;
+  --color-sidebar-active: var(--color-surface);
+  --color-text: #e4edf2;
+  --color-text-display: #e4edf2;
+  --color-text-muted: #9eafb9;
+  --color-text-disabled: #687d89;
+  --color-line: #2d414b;
+  --color-line-visible: #3d5662;
+  --color-card-border: #3d5662;
+  --color-pill: transparent;
+  --color-pill-hover: rgba(228, 237, 242, 0.06);
+  --color-input-bg: #22343e;
+  --color-shadow: transparent;
+  --color-icon: var(--color-text-muted);
+
+  --color-accent: #aecbd9;
+  --color-accent-2: #c1d9e4;
+  --color-accent-soft: #293e49;
+  --color-on-accent: #17262e;
+  --color-accent-text: #b4cfdd;
+
+  --color-record: #e5544b;
+  --color-danger: #e0564d;
+
+  --color-interactive: #9bc2d6;
+  --color-success: #8cc06f;
+  --color-warning: #ddb255;
+  --color-warning-text: #ddb255;
+  --color-speaker-4: #e07a72;
+
+  /* Usage-meter status colours (#69) — AAA (>=7:1) on --color-surface #2a2418,
+     the panel/composer background. Warm hues lightened for the dark canvas. */
+  --color-status-warning: #d3ae4c;  /* 7.28:1 on #22343e */
+  --color-status-danger: #e8a09c;   /* 7.29:1 on #22343e */
+
+  --color-badge-bg: var(--color-surface);
+  --color-badge-border: var(--color-line-visible);
+  --color-badge-text: var(--color-text-muted);
+  --color-switch-on: var(--color-accent);
+
+  --color-ink: var(--color-text);
+  --color-ink-muted: var(--color-text-muted);
+
+  --shadow-card: 0 10px 28px -14px rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
+}
